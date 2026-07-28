@@ -1,0 +1,6 @@
+# Code Composer Studio build output
+Debug/
+Release/
+
+# macOS metadata
+.DS_Store
