@@ -99,15 +99,19 @@ The ADC and DMA acquisition path is configured as follows:
 | Item | Configuration |
 | --- | --- |
 | Analog input | `PA25` / LaunchPad `J1_2`, ADC0 channel 2 |
-| ADC format | 12-bit unsigned, VDDA reference |
+| ADC format | 12-bit unsigned hardware code stored in signed `int16_t` values, VDDA reference |
 | Sample rate | 2.000 MS/s, triggered by TIMG0 every 500 ns |
-| Capture size | 4096 samples (`uint16_t`, 8 KiB) |
+| Capture size | 4096 raw samples plus 4096 processed samples (16 KiB) |
 | Capture duration | 2.048 ms |
 | FFT bin spacing | 488.28125 Hz for a 4096-point FFT |
 | DMA | ADC0 MEM0 to `gADCSamples`, incrementing destination |
 
-At startup, firmware captures one block and sets `gADCSamplesReady`. The timer
-then stops so `gADCSamples` remains stable for waveform and spectrum processing.
+Each call to `captureAndProcessSamples()` captures one block into the signed
+`gADCSamples` buffer, averages it with signed arithmetic to find the ADC's DC
+bias, and converts every sample to signed millivolts after subtracting that
+bias. `gDCBiasMillivolts` and all sample buffers use signed storage.
+`gSamplesReady` becomes true when the centered values in
+`gSamplesMillivolts` are ready for processing.
 
 `PA25` must stay between 0 V and VDDA. The competition signal therefore needs
 an analog front end that provides 50-ohm termination, gain, mid-supply bias,
