@@ -625,8 +625,10 @@ void captureAndProcessSamples(void)
             sqrtf(0.5f * sumOfComponentSquares) + 0.5f);
     }
     gSamplesReady = true;
-    gUppMillivolts = gUppMillivolts / 1.92 + gFundamentalFrequencyHz * 0.0000103;
-    gUrmsMillivolts = gUrmsMillivolts / 1.92 + gFundamentalFrequencyHz * 0.0000103;
+    gUppMillivolts = (gUppMillivolts * 0.969 * 0.213 * 1.025);
+    gUppMillivolts = gUppMillivolts + ((gFundamentalFrequencyHz * gUppMillivolts)/1000000) * 0.12;
+    gUrmsMillivolts = (gUrmsMillivolts * 0.969 * 0.213 * 1.025);
+    gUrmsMillivolts = gUrmsMillivolts + ((gFundamentalFrequencyHz * gUrmsMillivolts)/1000000) * 0.12;
     for(int i = 0 ; i<3 ; i++)
     {
         gSpectrumAmplitudeMillivolts[i] = gSpectrumAmplitudeMillivolts[i] / 1.92 + gFundamentalFrequencyHz * 0.0000103;
