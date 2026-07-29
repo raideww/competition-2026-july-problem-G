@@ -12,6 +12,9 @@
     (SAMPLE_TIMER_CLOCK_HZ / SAMPLE_TIMER_TICKS_PER_SAMPLE)
 #define ADC_MAX_CODE                  (4095)
 #define ADC_REFERENCE_MV              (3300)
+/* Measured AC input-gain correction: 0.969, represented exactly. */
+#define INPUT_VOLTAGE_CALIBRATION_NUMERATOR   (980)
+#define INPUT_VOLTAGE_CALIBRATION_DENOMINATOR (1000)
 #define MAX_SPECTRAL_COMPONENTS (3U)
 #define MIN_SPECTRUM_FREQUENCY_HZ (10000UL)
 #define MAX_SPECTRUM_FREQUENCY_HZ (500000UL)
@@ -151,12 +154,16 @@ void captureAndProcessSamples(void)
 
     for (int32_t i = 0; i < SAMPLE_COUNT; i++) {
         int32_t delta = (int32_t) gADCSamples[i] - biasCode;
-        int32_t numerator = delta * ADC_REFERENCE_MV;
+        int64_t numerator =
+            (int64_t) delta * ADC_REFERENCE_MV *
+            INPUT_VOLTAGE_CALIBRATION_NUMERATOR;
+        const int32_t denominator =
+            ADC_MAX_CODE * INPUT_VOLTAGE_CALIBRATION_DENOMINATOR;
 
-        numerator += (numerator >= 0) ? ADC_MAX_CODE / 2
-                                     : -(ADC_MAX_CODE / 2);
+        numerator += (numerator >= 0) ? denominator / 2
+                                     : -(denominator / 2);
         int16_t sampleMillivolts =
-            (int16_t) (numerator / ADC_MAX_CODE);
+            (int16_t) (numerator / denominator);
         gSamplesMillivolts[i] = sampleMillivolts;
 
         if (sampleMillivolts < minimumMillivolts) {
