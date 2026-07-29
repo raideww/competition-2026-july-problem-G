@@ -4,11 +4,33 @@
 
 #include "ti_msp_dl_config.h"
 
-#define SAMPLE_COUNT     (4096)
-#define SAMPLE_RATE_HZ   (2000000UL)
-#define ADC_MAX_CODE     (4095)
-#define ADC_REFERENCE_MV (3300)
+#define SAMPLE_COUNT                  (4096)
+#define SAMPLE_TIMER_CLOCK_HZ         (40000000UL)
+#define SAMPLE_TIMER_TICKS_PER_SAMPLE \
+    (SAMPLE_TIMER_INST_LOAD_VALUE + 1UL)
+#define SAMPLE_RATE_HZ \
+    (SAMPLE_TIMER_CLOCK_HZ / SAMPLE_TIMER_TICKS_PER_SAMPLE)
+#define ADC_MAX_CODE                  (4095)
+#define ADC_REFERENCE_MV              (3300)
 #define MAX_SPECTRAL_COMPONENTS (3U)
+#define MIN_SPECTRUM_FREQUENCY_HZ (10000UL)
+#define MAX_SPECTRUM_FREQUENCY_HZ (500000UL)
+#define HARMONIC_TOLERANCE_HZ      (1000UL)
+#define MAX_HARMONIC_ORDER \
+    (MAX_SPECTRUM_FREQUENCY_HZ / MIN_SPECTRUM_FREQUENCY_HZ)
+#define TWO_LINE_MIN_FUNDAMENTAL_AMPLITUDE_MV (2U)
+#define TWO_LINE_MAX_AMPLITUDE_RATIO          (32U)
+
+/* TIMG0 is explicitly locked to the 40 MHz HFXT BUSCLK in empty.syscfg. */
+_Static_assert(CPUCLK_FREQ == SAMPLE_TIMER_CLOCK_HZ,
+    "sampling timer clock requires the 40 MHz HFXT clock tree");
+_Static_assert(
+    (SAMPLE_TIMER_CLOCK_HZ % SAMPLE_TIMER_TICKS_PER_SAMPLE) == 0UL,
+    "sampling timer period must produce an integer sample rate");
+_Static_assert(SAMPLE_RATE_HZ == 2000000UL,
+    "sampling timer changed: update FFT frequency limits and scaling");
+_Static_assert(SAMPLE_RATE_HZ <= (SAMPLE_COUNT * 500UL),
+    "FFT bin spacing must not exceed 500 Hz");
 
 int16_t gADCSamples[SAMPLE_COUNT];
 int16_t gSamplesMillivolts[SAMPLE_COUNT];
@@ -21,6 +43,38 @@ uint32_t gSpectrumFrequencyHz[MAX_SPECTRAL_COMPONENTS];
 uint16_t gSpectrumAmplitudeMillivolts[MAX_SPECTRAL_COMPONENTS];
 volatile bool gSamplesReady = false;
 static volatile bool gCaptureComplete = false;
+
+static uint32_t getHarmonicOrder(
+    uint32_t frequencyHz, uint32_t fundamentalHz)
+{
+    if (fundamentalHz == 0U) {
+        return 0U;
+    }
+
+    uint32_t harmonic =
+        (frequencyHz + (fundamentalHz / 2U)) / fundamentalHz;
+    if ((harmonic == 0U) || (harmonic > MAX_HARMONIC_ORDER)) {
+        return 0U;
+    }
+
+    uint32_t expectedFrequencyHz = harmonic * fundamentalHz;
+    uint32_t errorHz = (frequencyHz > expectedFrequencyHz)
+                           ? frequencyHz - expectedFrequencyHz
+                           : expectedFrequencyHz - frequencyHz;
+    return (errorHz <= HARMONIC_TOLERANCE_HZ) ? harmonic : 0U;
+}
+
+static uint32_t countSupportedSpectrumComponents(uint32_t fundamentalHz)
+{
+    uint32_t supported = 0U;
+    for (uint32_t i = 0U; i < gSpectrumComponentCount; i++) {
+        if (getHarmonicOrder(
+                gSpectrumFrequencyHz[i], fundamentalHz) != 0U) {
+            supported++;
+        }
+    }
+    return supported;
+}
 
 void captureAndProcessSamples(void)
 {
@@ -305,10 +359,10 @@ void captureAndProcessSamples(void)
         uint32_t frequencyHz = (uint32_t) (
             ((bin + fractionalBin) * SAMPLE_RATE_HZ / SAMPLE_COUNT) +
             0.5f);
-        if (frequencyHz < 10000U) {
-            frequencyHz = 10000U;
-        } else if (frequencyHz > 500000U) {
-            frequencyHz = 500000U;
+        if (frequencyHz < MIN_SPECTRUM_FREQUENCY_HZ) {
+            frequencyHz = MIN_SPECTRUM_FREQUENCY_HZ;
+        } else if (frequencyHz > MAX_SPECTRUM_FREQUENCY_HZ) {
+            frequencyHz = MAX_SPECTRUM_FREQUENCY_HZ;
         }
 
         uint64_t lobePower = 0;
@@ -333,7 +387,7 @@ void captureAndProcessSamples(void)
         gSpectrumComponentCount++;
     }
 
-    /* Frequency order makes the first line the fundamental. */
+    /* Frequency order is useful for the displayed spectrum. */
     for (uint32_t i = 1; i < gSpectrumComponentCount; i++) {
         uint32_t frequency = gSpectrumFrequencyHz[i];
         uint16_t amplitude = gSpectrumAmplitudeMillivolts[i];
@@ -349,8 +403,101 @@ void captureAndProcessSamples(void)
         gSpectrumFrequencyHz[position] = frequency;
         gSpectrumAmplitudeMillivolts[position] = amplitude;
     }
+
     if (gSpectrumComponentCount != 0) {
-        gFundamentalFrequencyHz = gSpectrumFrequencyHz[0];
+        /*
+         * A low noise spur must not become the fundamental merely because it
+         * is the lowest selected frequency. Start with the strongest line,
+         * then accept a lower candidate only when it is strong enough and
+         * explains more selected lines as integer harmonics.
+         */
+        uint32_t strongestIndex = 0U;
+        for (uint32_t i = 1U; i < gSpectrumComponentCount; i++) {
+            if (gSpectrumAmplitudeMillivolts[i] >
+                gSpectrumAmplitudeMillivolts[strongestIndex]) {
+                strongestIndex = i;
+            }
+        }
+
+        uint32_t strongestFrequencyHz =
+            gSpectrumFrequencyHz[strongestIndex];
+        uint16_t strongestAmplitudeMillivolts =
+            gSpectrumAmplitudeMillivolts[strongestIndex];
+        gFundamentalFrequencyHz = strongestFrequencyHz;
+        uint32_t bestSupportedCount =
+            countSupportedSpectrumComponents(gFundamentalFrequencyHz);
+        uint16_t bestCandidateAmplitudeMillivolts =
+            strongestAmplitudeMillivolts;
+        uint32_t bestStrongestHarmonic = 1U;
+
+        for (uint32_t i = 0U; i < gSpectrumComponentCount; i++) {
+            uint32_t candidateFrequencyHz = gSpectrumFrequencyHz[i];
+            uint16_t candidateAmplitudeMillivolts =
+                gSpectrumAmplitudeMillivolts[i];
+            if (candidateFrequencyHz >= strongestFrequencyHz) {
+                continue;
+            }
+            uint32_t strongestHarmonic = getHarmonicOrder(
+                strongestFrequencyHz, candidateFrequencyHz);
+            if (strongestHarmonic < 2U) {
+                continue;
+            }
+
+            uint32_t supportedCount =
+                countSupportedSpectrumComponents(candidateFrequencyHz);
+            if (supportedCount < MAX_SPECTRAL_COMPONENTS) {
+                if (candidateAmplitudeMillivolts <
+                    TWO_LINE_MIN_FUNDAMENTAL_AMPLITUDE_MV) {
+                    continue;
+                }
+                if (((uint32_t) candidateAmplitudeMillivolts *
+                     TWO_LINE_MAX_AMPLITUDE_RATIO) <
+                    strongestAmplitudeMillivolts) {
+                    continue;
+                }
+            }
+
+            bool betterCandidate = supportedCount > bestSupportedCount;
+            if (supportedCount == bestSupportedCount) {
+                if (candidateAmplitudeMillivolts >
+                    bestCandidateAmplitudeMillivolts) {
+                    betterCandidate = true;
+                } else if ((candidateAmplitudeMillivolts ==
+                            bestCandidateAmplitudeMillivolts) &&
+                           (strongestHarmonic < bestStrongestHarmonic)) {
+                    betterCandidate = true;
+                }
+            }
+
+            if (betterCandidate) {
+                gFundamentalFrequencyHz = candidateFrequencyHz;
+                bestSupportedCount = supportedCount;
+                bestCandidateAmplitudeMillivolts =
+                    candidateAmplitudeMillivolts;
+                bestStrongestHarmonic = strongestHarmonic;
+            }
+        }
+
+        /* Remove unrelated peaks before phase recovery and reconstruction. */
+        uint32_t validComponentCount = 0U;
+        uint32_t detectedComponentCount = gSpectrumComponentCount;
+        for (uint32_t i = 0U; i < detectedComponentCount; i++) {
+            if (getHarmonicOrder(gSpectrumFrequencyHz[i],
+                    gFundamentalFrequencyHz) == 0U) {
+                continue;
+            }
+            gSpectrumFrequencyHz[validComponentCount] =
+                gSpectrumFrequencyHz[i];
+            gSpectrumAmplitudeMillivolts[validComponentCount] =
+                gSpectrumAmplitudeMillivolts[i];
+            validComponentCount++;
+        }
+        for (uint32_t i = validComponentCount;
+             i < detectedComponentCount; i++) {
+            gSpectrumFrequencyHz[i] = 0U;
+            gSpectrumAmplitudeMillivolts[i] = 0U;
+        }
+        gSpectrumComponentCount = (uint8_t) validComponentCount;
 
         /* Recover each line's phase from the preserved time samples. */
         float componentCos[MAX_SPECTRAL_COMPONENTS] = {0.0f};
@@ -479,7 +626,7 @@ int main(void)
     while (1) {
         captureAndProcessSamples();
 
-        // DL_Common_delayCycles(CPUCLK_FREQ);
+        DL_Common_delayCycles(CPUCLK_FREQ);
     }
 }
 

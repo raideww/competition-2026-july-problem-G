@@ -100,11 +100,22 @@ The ADC and DMA acquisition path is configured as follows:
 | --- | --- |
 | Analog input | `PA25` / LaunchPad `J1_2`, ADC0 channel 2 |
 | ADC format | 12-bit unsigned hardware code stored in signed `int16_t` values, VDDA reference |
-| Sample rate | 2.000 MS/s, triggered by TIMG0 every 500 ns |
+| Sample rate | 2.000 MS/s from the 40 MHz HFXT, one ADC conversion every 500 ns |
 | Capture size | 4096 raw samples plus 4096 processed samples (16 KiB) |
 | Capture duration | 2.048 ms |
 | FFT bin spacing | 488.28125 Hz for a 4096-point FFT |
 | DMA | ADC0 MEM0 to `gADCSamples`, incrementing destination |
+
+TIMG0 uses the LaunchPad's populated 40 MHz HFXT through BUSCLK, with no divider
+or prescaler. The internal SYSOSC is not used as the sampling time base because
+its tolerance would make frequency error increase in proportion to the input
+frequency. `PA5` and `PA6` are therefore reserved for the HFXT crystal. ADC MEM0
+uses the same crystal-derived clock through ULPCLK and is set to `TRIGGER_NEXT`,
+so every timer event starts exactly one deterministic conversion instead of
+crossing into the asynchronous SYSOSC domain or letting repeat mode free-run.
+The firmware derives its FFT sample-rate constant from the generated timer load
+value and uses compile-time checks to catch timing changes that would invalidate
+the FFT frequency scale or 500 Hz resolution.
 
 Each call to `captureAndProcessSamples()` captures one block into the signed
 `gADCSamples` buffer, averages it with signed arithmetic to find the ADC's DC
@@ -113,11 +124,17 @@ bias. `gDCBiasMillivolts` and all sample buffers use signed storage.
 `gSamplesReady` becomes true when the centered values in
 `gSamplesMillivolts` are ready for processing.
 
+Detected spectral peaks are checked for integer-harmonic consistency before a
+fundamental is selected. The strongest line is the fallback; a lower line must
+be both significant and explain more of the detected spectrum before it can be
+treated as the fundamental. Unrelated low-frequency spurs are removed before
+phase recovery and waveform reconstruction.
+
 `PA25` must stay between 0 V and VDDA. The competition signal therefore needs
 an analog front end that provides 50-ohm termination, gain, mid-supply bias,
 input protection, and anti-alias filtering before the ADC pin.
 Accurate voltage results require measuring the real reference and calibrating
 front-end gain and offset.
 
-Signal analysis, interference rejection, display control, and user-interface
+Dedicated interference rejection, display control, and user-interface
 functions remain to be implemented.

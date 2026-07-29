@@ -14,14 +14,38 @@ const TIMER  = scripting.addModule("/ti/driverlib/TIMER", {}, false);
 const SAMPLE_TIMER = TIMER.addInstance();
 
 /*
+ * Use the LaunchPad's populated 40 MHz crystal for an accurate sampling time
+ * base. The internal SYSOSC tolerance is too large for 1 kHz accuracy at the
+ * top of the 500 kHz measurement range.
+ */
+const HFXT_SOURCE = system.clockTree["EXHFMUX"];
+HFXT_SOURCE.inputSelect = "EXHFMUX_XTAL";
+
+const HSCLK_SOURCE = system.clockTree["HSCLKMUX"];
+HSCLK_SOURCE.inputSelect = "HSCLKMUX_HFCLK";
+
+const ULPCLK_DIVIDER = system.clockTree["UDIV"];
+ULPCLK_DIVIDER.divideValue = 1;
+
+const HFXT = system.clockTree["HFXT"];
+HFXT.enable                       = true;
+HFXT.HFCLKMonitor                 = true;
+HFXT.HFXTStartup                  = 10;
+HFXT.inputFreq                    = 40;
+HFXT.peripheral.hfxInPin.$assign  = "PA5";
+HFXT.peripheral.hfxOutPin.$assign = "PA6";
+
+/*
  * ADC0 channel 2 is PA25 on the MSPM0G3507. A periodic event starts one
  * conversion per timer tick. MEM0 emits one DMA request per completed sample.
  */
 ADC.$name                      = "ADC12_0";
 ADC.repeatMode                 = true;
 ADC.trigSrc                    = "DL_ADC12_TRIG_SRC_EVENT";
+ADC.sampClkSrc                 = "DL_ADC12_CLOCK_ULPCLK";
 ADC.subChanID                  = 1;
 ADC.adcMem0chansel             = "DL_ADC12_INPUT_CHAN_2";
+ADC.adcMem0trig                = "DL_ADC12_TRIGGER_MODE_TRIGGER_NEXT";
 ADC.sampleTime0                = "62.5 ns";
 ADC.powerDownMode              = "DL_ADC12_POWER_DOWN_MODE_MANUAL";
 ADC.configureDMA               = true;
@@ -38,8 +62,11 @@ ADC.DMA_CHANNEL.srcLength            = "HALF_WORD";
 ADC.DMA_CHANNEL.dstLength            = "HALF_WORD";
 ADC.DMA_CHANNEL.transferMode         = "SINGLE";
 
-/* BUSCLK defaults to 32 MHz. A 500 ns period produces a 2.000 MS/s trigger. */
+/* The crystal-derived 40 MHz BUSCLK makes 20 timer ticks exactly 500 ns. */
 SAMPLE_TIMER.$name                       = "SAMPLE_TIMER";
+SAMPLE_TIMER.timerClkSrc                 = "BUSCLK";
+SAMPLE_TIMER.timerClkDiv                 = 1;
+SAMPLE_TIMER.timerClkPrescale            = 1;
 SAMPLE_TIMER.timerMode                   = "PERIODIC";
 SAMPLE_TIMER.timerPeriod                 = "500 ns";
 SAMPLE_TIMER.event1PublisherChannel      = 1;
@@ -47,4 +74,5 @@ SAMPLE_TIMER.event1ControllerInterruptEn = ["ZERO_EVENT"];
 SAMPLE_TIMER.peripheral.$assign          = "TIMG0";
 
 SYSCTL.forceDefaultClkConfig = true;
+SYSCTL.validateClkStatus      = true;
 SYSCTL.clockTreeEn           = true;
