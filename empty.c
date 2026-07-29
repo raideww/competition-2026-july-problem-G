@@ -1,6 +1,7 @@
 #include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #include "ti_msp_dl_config.h"
 
@@ -46,6 +47,9 @@ uint32_t gSpectrumFrequencyHz[MAX_SPECTRAL_COMPONENTS];
 uint16_t gSpectrumAmplitudeMillivolts[MAX_SPECTRAL_COMPONENTS];
 volatile bool gSamplesReady = false;
 static volatile bool gCaptureComplete = false;
+
+char txBuf[32];
+void HMI_AddWave(uint32_t value,uint8_t vvs,uint8_t j);
 
 static uint32_t getHarmonicOrder(
     uint32_t frequencyHz, uint32_t fundamentalHz)
@@ -639,6 +643,48 @@ int main(void)
     while (1) {
         captureAndProcessSamples();
 
+        for(int j = 0 ; j < 7 ; j++)
+        {
+            int value;
+            switch(j)
+            {
+                case 0:
+                    value = gUppMillivolts;
+                    HMI_AddWave(value,0,j);
+                    DL_Common_delayCycles(3200);
+                    break;
+                case 1:
+                    value = gUrmsMillivolts;
+                    HMI_AddWave(value,0,j);
+                    DL_Common_delayCycles(3200);
+                    break;
+                case 2:
+                    value = gFundamentalFrequencyHz;
+                    HMI_AddWave(value,3,j);
+                    DL_Common_delayCycles(3200);
+                    break;
+                case 3:
+                    value = gSpectrumFrequencyHz[1];
+                    HMI_AddWave(value,3,j);
+                    DL_Common_delayCycles(3200);
+                    break;
+                case 4:
+                    value = gSpectrumAmplitudeMillivolts[1];
+                    HMI_AddWave(value,0,j);
+                    DL_Common_delayCycles(3200);
+                    break;
+                case 5:
+                    value = gSpectrumFrequencyHz[2];
+                    HMI_AddWave(value,3,j);
+                    DL_Common_delayCycles(3200);
+                    break;
+                case 6:
+                    value = gSpectrumAmplitudeMillivolts[2];
+                    HMI_AddWave(value,0,j);
+                    DL_Common_delayCycles(3200);
+                    break;
+            }
+        }
         DL_Common_delayCycles(CPUCLK_FREQ);
     }
 }
@@ -651,4 +697,31 @@ void ADC12_0_INST_IRQHandler(void)
         DL_ADC12_disableConversions(ADC12_0_INST);
         gCaptureComplete = true;
     }
+}
+
+void UART_SendString(char *str)
+{
+    while (*str)
+    {
+        DL_UART_Main_transmitData(UART_0_INST, *str++);
+        DL_Common_delayCycles(5000);
+    }
+}
+
+void HMI_End(void)
+{
+    DL_UART_Main_transmitData(UART_0_INST, 0xFF);
+    DL_Common_delayCycles(5000);
+    DL_UART_Main_transmitData(UART_0_INST, 0xFF);
+    DL_Common_delayCycles(5000);
+    DL_UART_Main_transmitData(UART_0_INST, 0xFF);
+}
+
+void HMI_AddWave(uint32_t value,uint8_t vvs,uint8_t j)
+{
+        sprintf(txBuf, "x%d.val=%d\xff\xff\xff", j,value);
+        UART_SendString(txBuf);
+        sprintf(txBuf, "x%d.vvs1=%d\xff\xff\xff",j,vvs);
+        UART_SendString(txBuf);
+    //HMI_End();
 }

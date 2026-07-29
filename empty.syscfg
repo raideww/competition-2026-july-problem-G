@@ -1,78 +1,88 @@
 /**
- * These arguments were used when this file was generated. They will be
- * automatically applied on subsequent loads via the GUI or CLI.
+ * These arguments were used when this file was generated. They will be automatically applied on subsequent loads
+ * via the GUI or CLI. Run CLI with '--help' for additional information on how to override these arguments.
+ * @cliArgs --device "MSPM0G350X" --part "Default" --package "LQFP-64(PM)" --product "mspm0_sdk@2.10.00.04"
+ * @v2CliArgs --device "MSPM0G3507" --package "LQFP-64(PM)" --product "mspm0_sdk@2.10.00.04"
+ * @versions {"tool":"1.26.2+4477"}
  */
-//@cliArgs --device "MSPM0G350X" --package "LQFP-64(PM)" --part "Default"
-//@v2CliArgs --device "MSPM0G3507" --package "LQFP-64(PM)"
-// @cliArgs --board /ti/boards/LP_MSPM0G3507 --rtos nortos
 
-const Board  = scripting.addModule("/ti/driverlib/Board", {}, false);
-const SYSCTL = scripting.addModule("/ti/driverlib/SYSCTL");
+/**
+ * Import the modules used in this configuration.
+ */
 const ADC12  = scripting.addModule("/ti/driverlib/ADC12", {}, false);
-const ADC    = ADC12.addInstance();
+const ADC121 = ADC12.addInstance();
+const SYSCTL = scripting.addModule("/ti/driverlib/SYSCTL");
 const TIMER  = scripting.addModule("/ti/driverlib/TIMER", {}, false);
-const SAMPLE_TIMER = TIMER.addInstance();
+const TIMER1 = TIMER.addInstance();
+const UART   = scripting.addModule("/ti/driverlib/UART", {}, false);
+const UART1  = UART.addInstance();
 
-/*
- * Use the LaunchPad's populated 40 MHz crystal for an accurate sampling time
- * base. The internal SYSOSC tolerance is too large for 1 kHz accuracy at the
- * top of the 500 kHz measurement range.
+/**
+ * Write custom configuration values to the imported modules.
  */
-const HFXT_SOURCE = system.clockTree["EXHFMUX"];
-HFXT_SOURCE.inputSelect = "EXHFMUX_XTAL";
+const mux4       = system.clockTree["EXHFMUX"];
+mux4.inputSelect = "EXHFMUX_XTAL";
 
-const HSCLK_SOURCE = system.clockTree["HSCLKMUX"];
-HSCLK_SOURCE.inputSelect = "HSCLKMUX_HFCLK";
+const mux8       = system.clockTree["HSCLKMUX"];
+mux8.inputSelect = "HSCLKMUX_HFCLK";
 
-const ULPCLK_DIVIDER = system.clockTree["UDIV"];
-ULPCLK_DIVIDER.divideValue = 1;
+const pinFunction4                        = system.clockTree["HFXT"];
+pinFunction4.enable                       = true;
+pinFunction4.HFCLKMonitor                 = true;
+pinFunction4.HFXTStartup                  = 10;
+pinFunction4.inputFreq                    = 40;
+pinFunction4.peripheral.hfxInPin.$assign  = "PA5";
+pinFunction4.peripheral.hfxOutPin.$assign = "PA6";
 
-const HFXT = system.clockTree["HFXT"];
-HFXT.enable                       = true;
-HFXT.HFCLKMonitor                 = true;
-HFXT.HFXTStartup                  = 10;
-HFXT.inputFreq                    = 40;
-HFXT.peripheral.hfxInPin.$assign  = "PA5";
-HFXT.peripheral.hfxOutPin.$assign = "PA6";
+ADC121.$name                          = "ADC12_0";
+ADC121.repeatMode                     = true;
+ADC121.trigSrc                        = "DL_ADC12_TRIG_SRC_EVENT";
+ADC121.sampClkSrc                     = "DL_ADC12_CLOCK_ULPCLK";
+ADC121.subChanID                      = 1;
+ADC121.adcMem0chansel                 = "DL_ADC12_INPUT_CHAN_2";
+ADC121.adcMem0trig                    = "DL_ADC12_TRIGGER_MODE_TRIGGER_NEXT";
+ADC121.sampleTime0                    = "62.5 ns";
+ADC121.powerDownMode                  = "DL_ADC12_POWER_DOWN_MODE_MANUAL";
+ADC121.configureDMA                   = true;
+ADC121.sampCnt                        = 1;
+ADC121.enabledDMATriggers             = ["DL_ADC12_DMA_MEM0_RESULT_LOADED"];
+ADC121.enabledInterrupts              = ["DL_ADC12_INTERRUPT_DMA_DONE"];
+ADC121.peripheral.$assign             = "ADC0";
+ADC121.peripheral.adcPin2.$assign     = "PA25";
+ADC121.adcPin2Config.$name            = "ti_driverlib_gpio_GPIOPinGeneric0";
+ADC121.DMA_CHANNEL.$name              = "DMA_CH0";
+ADC121.DMA_CHANNEL.addressMode        = "f2b";
+ADC121.DMA_CHANNEL.srcLength          = "HALF_WORD";
+ADC121.DMA_CHANNEL.dstLength          = "HALF_WORD";
+ADC121.DMA_CHANNEL.peripheral.$assign = "DMA_CH0";
 
-/*
- * ADC0 channel 2 is PA25 on the MSPM0G3507. A periodic event starts one
- * conversion per timer tick. MEM0 emits one DMA request per completed sample.
- */
-ADC.$name                      = "ADC12_0";
-ADC.repeatMode                 = true;
-ADC.trigSrc                    = "DL_ADC12_TRIG_SRC_EVENT";
-ADC.sampClkSrc                 = "DL_ADC12_CLOCK_ULPCLK";
-ADC.subChanID                  = 1;
-ADC.adcMem0chansel             = "DL_ADC12_INPUT_CHAN_2";
-ADC.adcMem0trig                = "DL_ADC12_TRIGGER_MODE_TRIGGER_NEXT";
-ADC.sampleTime0                = "62.5 ns";
-ADC.powerDownMode              = "DL_ADC12_POWER_DOWN_MODE_MANUAL";
-ADC.configureDMA               = true;
-ADC.sampCnt                    = 1;
-ADC.enabledDMATriggers         = ["DL_ADC12_DMA_MEM0_RESULT_LOADED"];
-ADC.enabledInterrupts          = ["DL_ADC12_INTERRUPT_DMA_DONE"];
-ADC.peripheral.$assign         = "ADC0";
-ADC.peripheral.adcPin2.$assign = "PA25";
-
-ADC.DMA_CHANNEL.$name                = "DMA_CH0";
-ADC.DMA_CHANNEL.peripheral.$assign   = "DMA_CH0";
-ADC.DMA_CHANNEL.addressMode          = "f2b";
-ADC.DMA_CHANNEL.srcLength            = "HALF_WORD";
-ADC.DMA_CHANNEL.dstLength            = "HALF_WORD";
-ADC.DMA_CHANNEL.transferMode         = "SINGLE";
-
-/* The crystal-derived 40 MHz BUSCLK makes 20 timer ticks exactly 500 ns. */
-SAMPLE_TIMER.$name                       = "SAMPLE_TIMER";
-SAMPLE_TIMER.timerClkSrc                 = "BUSCLK";
-SAMPLE_TIMER.timerClkDiv                 = 1;
-SAMPLE_TIMER.timerClkPrescale            = 1;
-SAMPLE_TIMER.timerMode                   = "PERIODIC";
-SAMPLE_TIMER.timerPeriod                 = "500 ns";
-SAMPLE_TIMER.event1PublisherChannel      = 1;
-SAMPLE_TIMER.event1ControllerInterruptEn = ["ZERO_EVENT"];
-SAMPLE_TIMER.peripheral.$assign          = "TIMG0";
+const Board = scripting.addModule("/ti/driverlib/Board", {}, false);
 
 SYSCTL.forceDefaultClkConfig = true;
-SYSCTL.validateClkStatus      = true;
+SYSCTL.validateClkStatus     = true;
 SYSCTL.clockTreeEn           = true;
+
+TIMER1.$name                       = "SAMPLE_TIMER";
+TIMER1.timerMode                   = "PERIODIC";
+TIMER1.timerPeriod                 = "500 ns";
+TIMER1.event1PublisherChannel      = 1;
+TIMER1.event1ControllerInterruptEn = ["ZERO_EVENT"];
+TIMER1.peripheral.$assign          = "TIMG0";
+
+UART1.$name                    = "UART_0";
+UART1.targetBaudRate           = 115200;
+UART1.peripheral.rxPin.$assign = "PA11";
+UART1.peripheral.txPin.$assign = "PA10";
+UART1.txPinConfig.$name        = "ti_driverlib_gpio_GPIOPinGeneric1";
+UART1.rxPinConfig.$name        = "ti_driverlib_gpio_GPIOPinGeneric2";
+
+/**
+ * Pinmux solution for unlocked pins/peripherals. This ensures that minor changes to the automatic solver in a future
+ * version of the tool will not impact the pinmux you originally saw.  These lines can be completely deleted in order to
+ * re-solve from scratch.
+ */
+pinFunction4.peripheral.$suggestSolution   = "SYSCTL";
+Board.peripheral.$suggestSolution          = "DEBUGSS";
+Board.peripheral.swclkPin.$suggestSolution = "PA20";
+Board.peripheral.swdioPin.$suggestSolution = "PA19";
+UART1.peripheral.$suggestSolution          = "UART0";
