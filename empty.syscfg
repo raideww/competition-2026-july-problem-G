@@ -1,20 +1,50 @@
 /**
- * These arguments were used when this file was generated. They will be automatically applied on subsequent loads
- * via the GUI or CLI. Run CLI with '--help' for additional information on how to override these arguments.
+ * These arguments were used when this file was generated. They will be
+ * automatically applied on subsequent loads via the GUI or CLI.
  */
 //@cliArgs --device "MSPM0G350X" --package "LQFP-64(PM)" --part "Default"
 //@v2CliArgs --device "MSPM0G3507" --package "LQFP-64(PM)"
 // @cliArgs --board /ti/boards/LP_MSPM0G3507 --rtos nortos
 
-/**
- * Import the modules used in this configuration.
- */
+const Board  = scripting.addModule("/ti/driverlib/Board", {}, false);
 const SYSCTL = scripting.addModule("/ti/driverlib/SYSCTL");
+const ADC12  = scripting.addModule("/ti/driverlib/ADC12", {}, false);
+const ADC    = ADC12.addInstance();
+const TIMER  = scripting.addModule("/ti/driverlib/TIMER", {}, false);
+const SAMPLE_TIMER = TIMER.addInstance();
 
-/**
- * Write custom configuration values to the imported modules.
+/*
+ * ADC0 channel 2 is PA25 on the MSPM0G3507. A periodic event starts one
+ * conversion per timer tick. MEM0 emits one DMA request per completed sample.
  */
+ADC.$name                      = "ADC12_0";
+ADC.repeatMode                 = true;
+ADC.trigSrc                    = "DL_ADC12_TRIG_SRC_EVENT";
+ADC.subChanID                  = 1;
+ADC.adcMem0chansel             = "DL_ADC12_INPUT_CHAN_2";
+ADC.sampleTime0                = "62.5 ns";
+ADC.powerDownMode              = "DL_ADC12_POWER_DOWN_MODE_MANUAL";
+ADC.configureDMA               = true;
+ADC.sampCnt                    = 1;
+ADC.enabledDMATriggers         = ["DL_ADC12_DMA_MEM0_RESULT_LOADED"];
+ADC.enabledInterrupts          = ["DL_ADC12_INTERRUPT_DMA_DONE"];
+ADC.peripheral.$assign         = "ADC0";
+ADC.peripheral.adcPin2.$assign = "PA25";
 
-const Board = scripting.addModule("/ti/driverlib/Board", {}, false);
+ADC.DMA_CHANNEL.$name                = "DMA_CH0";
+ADC.DMA_CHANNEL.peripheral.$assign   = "DMA_CH0";
+ADC.DMA_CHANNEL.addressMode          = "f2b";
+ADC.DMA_CHANNEL.srcLength            = "HALF_WORD";
+ADC.DMA_CHANNEL.dstLength            = "HALF_WORD";
+ADC.DMA_CHANNEL.transferMode         = "SINGLE";
+
+/* BUSCLK defaults to 32 MHz. A 500 ns period produces a 2.000 MS/s trigger. */
+SAMPLE_TIMER.$name                       = "SAMPLE_TIMER";
+SAMPLE_TIMER.timerMode                   = "PERIODIC";
+SAMPLE_TIMER.timerPeriod                 = "500 ns";
+SAMPLE_TIMER.event1PublisherChannel      = 1;
+SAMPLE_TIMER.event1ControllerInterruptEn = ["ZERO_EVENT"];
+SAMPLE_TIMER.peripheral.$assign          = "TIMG0";
 
 SYSCTL.forceDefaultClkConfig = true;
+SYSCTL.clockTreeEn           = true;
