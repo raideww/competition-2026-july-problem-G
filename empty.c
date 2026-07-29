@@ -621,6 +621,12 @@ void captureAndProcessSamples(void)
             sqrtf(0.5f * sumOfComponentSquares) + 0.5f);
     }
     gSamplesReady = true;
+    gUppMillivolts /= (1.85);
+    gUrmsMillivolts /= (1.85);
+    for(int i = 0 ; i<3 ; i++)
+    {
+        gSpectrumAmplitudeMillivolts[i] /= (1.85);
+    }
 }
 
 int main(void)
