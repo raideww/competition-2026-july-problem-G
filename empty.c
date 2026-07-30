@@ -53,6 +53,17 @@ char txBuf[64];
 void HMI_AddWave(uint32_t value,uint8_t vvs,uint8_t j);
 void HMI_SendFullWave(uint8_t channel, int16_t *data, uint32_t count,uint32_t freq, uint32_t sampleRate, uint32_t controlWidth);
 
+#define UART_RX_BUF_SIZE    32     // 接收缓冲区大小
+#define RX_END_MARKER       0xFF    // 结束符
+
+// 接收缓冲区
+char rxBuffer[UART_RX_BUF_SIZE];
+uint16_t rxIndex = 0;
+bool rxCommandReady = false;        // 收到完整指令的标志
+
+// 用于检测 \xff\xff\xff
+uint8_t ffCount = 0;               // 连续收到FF的次数
+
 static uint32_t getHarmonicOrder(
     uint32_t frequencyHz, uint32_t fundamentalHz)
 {
@@ -652,7 +663,7 @@ int main(void)
 
     while (1) {
         captureAndProcessSamples();
-        for(int j = 0 ; j < 7 ; j++)
+        for(int j = 0 ; j < 9 ; j++)
         {
             int value;
             switch(j)
@@ -689,6 +700,16 @@ int main(void)
                     break;
                 case 6:
                     value = gSpectrumAmplitudeMillivolts[2];
+                    HMI_AddWave(value,0,j);
+                    DL_Common_delayCycles(3200);
+                    break;
+                case 7:
+                    value = gSpectrumFrequencyHz[0];
+                    HMI_AddWave(value,3,j);
+                    DL_Common_delayCycles(3200);
+                    break;
+                case 8:
+                    value = gSpectrumAmplitudeMillivolts[0];
                     HMI_AddWave(value,0,j);
                     DL_Common_delayCycles(3200);
                     break;
