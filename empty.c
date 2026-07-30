@@ -15,9 +15,13 @@
     (SAMPLE_TIMER_CLOCK_HZ / SAMPLE_TIMER_TICKS_PER_SAMPLE)
 #define ADC_MAX_CODE                  (4095)
 #define ADC_REFERENCE_MV              (3300)
-/* Measured AC input-gain correction: 0.969, represented exactly. */
+/* Measured ADC-path gain correction: 0.980, represented exactly. */
 #define INPUT_VOLTAGE_CALIBRATION_NUMERATOR   (980)
 #define INPUT_VOLTAGE_CALIBRATION_DENOMINATOR (1000)
+#define FRONT_END_AMPLITUDE_SCALE             (0.118f)
+#define FRONT_END_SCALE_SLOPE_PER_MHZ         (0.08f)
+#define HERTZ_PER_MEGAHERTZ                   (1000000.0f)
+#define MIN_REPORTED_COMPONENT_AMPLITUDE_MV   (5U)
 #define MAX_SPECTRAL_COMPONENTS (3U)
 #define MIN_SPECTRUM_FREQUENCY_HZ (10000UL)
 #define MAX_SPECTRUM_FREQUENCY_HZ (500000UL)
@@ -115,6 +119,14 @@ static uint32_t countSupportedSpectrumComponents(uint32_t fundamentalHz)
     return supported;
 }
 
+static float getFrontEndAmplitudeScale(uint32_t frequencyHz)
+{
+    float frequencyMHz = (float) frequencyHz / HERTZ_PER_MEGAHERTZ;
+    float scale = FRONT_END_AMPLITUDE_SCALE *
+                  (1.0f - FRONT_END_SCALE_SLOPE_PER_MHZ * frequencyMHz);
+    return (scale > 0.0f) ? scale : 0.0f;
+}
+
 void captureAndProcessSamples(void)
 {
     /* One scratch array plus gADCSamples form an in-place complex FFT. */
@@ -144,7 +156,6 @@ void captureAndProcessSamples(void)
     gCaptureComplete = false;
     gUppMillivolts = 0;
     gUrmsMillivolts = 0;
-    //gFundamentalFrequencyHz = 0;
     gSpectrumComponentCount = 0;
     for (uint32_t i = 0; i < MAX_SPECTRAL_COMPONENTS; i++) {
         gSpectrumFrequencyHz[i] = 0;
@@ -522,7 +533,11 @@ void captureAndProcessSamples(void)
             }
         }
 
-        /* Remove unrelated peaks before phase recovery and reconstruction. */
+        /*
+         * Remove unrelated peaks and calibrate each retained component at its
+         * own frequency before RMS calculation and reconstruction.
+         */
+        float calibratedPeakMillivolts[MAX_SPECTRAL_COMPONENTS] = {0.0f};
         uint32_t validComponentCount = 0U;
         uint32_t detectedComponentCount = gSpectrumComponentCount;
         for (uint32_t i = 0U; i < detectedComponentCount; i++) {
@@ -530,10 +545,18 @@ void captureAndProcessSamples(void)
                     gFundamentalFrequencyHz) == 0U) {
                 continue;
             }
+
+            uint32_t componentFrequencyHz = gSpectrumFrequencyHz[i];
+            float calibratedAmplitudeMillivolts =
+                (float) gSpectrumAmplitudeMillivolts[i] *
+                getFrontEndAmplitudeScale(componentFrequencyHz);
+
             gSpectrumFrequencyHz[validComponentCount] =
-                gSpectrumFrequencyHz[i];
+                componentFrequencyHz;
             gSpectrumAmplitudeMillivolts[validComponentCount] =
-                gSpectrumAmplitudeMillivolts[i];
+                (uint16_t) (calibratedAmplitudeMillivolts + 0.5f);
+            calibratedPeakMillivolts[validComponentCount] =
+                calibratedAmplitudeMillivolts;
             validComponentCount++;
         }
         for (uint32_t i = validComponentCount;
@@ -602,7 +625,7 @@ void captureAndProcessSamples(void)
         for (uint32_t i = 0; i < gSpectrumComponentCount; i++) {
             float phaseLength = sqrtf(componentCos[i] * componentCos[i] +
                                       componentSin[i] * componentSin[i]);
-            float amplitude = gSpectrumAmplitudeMillivolts[i];
+            float amplitude = calibratedPeakMillivolts[i];
             if (phaseLength > 0.0f) {
                 componentCos[i] *= amplitude / phaseLength;
                 componentSin[i] *= amplitude / phaseLength;
@@ -656,22 +679,23 @@ void captureAndProcessSamples(void)
             reconstructedMaximum - reconstructedMinimum + 0.5f);
         gUrmsMillivolts = (uint16_t) (
             sqrtf(0.5f * sumOfComponentSquares) + 0.5f);
+    } else {
+        /* No frequency estimate is available for the fallback measurements. */
+        float baseScale = getFrontEndAmplitudeScale(0U);
+        gUppMillivolts = (uint16_t) (
+            (float) gUppMillivolts * baseScale + 0.5f);
+        gUrmsMillivolts = (uint16_t) (
+            (float) gUrmsMillivolts * baseScale + 0.5f);
     }
-    gSamplesReady = true;
-    gUppMillivolts = (gUppMillivolts * 0.118);
-    gUppMillivolts = gUppMillivolts - ((gFundamentalFrequencyHz * gUppMillivolts)/1000000) * 0.08;
-    gUrmsMillivolts = (gUrmsMillivolts * 0.118);
-    gUrmsMillivolts = gUrmsMillivolts - ((gFundamentalFrequencyHz * gUrmsMillivolts)/1000000) * 0.08;
-    for(int i = 0 ; i<3 ; i++)
-    {
-        gSpectrumAmplitudeMillivolts[i] = gSpectrumAmplitudeMillivolts[i] *0.118 * 2;
-        gSpectrumAmplitudeMillivolts[i] = gSpectrumAmplitudeMillivolts[i] - ((gFundamentalFrequencyHz * gSpectrumAmplitudeMillivolts[i])/1000000) * 0.08;
-        if(gSpectrumAmplitudeMillivolts[i]<5)
-        {
-            gSpectrumAmplitudeMillivolts[i] = 0;
-            gSpectrumFrequencyHz[i] = 0;
+    for (uint32_t i = 0U; i < gSpectrumComponentCount; i++) {
+        if ((gSpectrumFrequencyHz[i] != gFundamentalFrequencyHz) &&
+            (gSpectrumAmplitudeMillivolts[i] <
+             MIN_REPORTED_COMPONENT_AMPLITUDE_MV)) {
+            gSpectrumAmplitudeMillivolts[i] = 0U;
+            gSpectrumFrequencyHz[i] = 0U;
         }
     }
+    gSamplesReady = true;
 }
 
 int main(void)
@@ -828,11 +852,13 @@ void HMI_SendFullWave(uint8_t channel, int16_t *data, uint32_t count,
             uint16_t b = 1.0 * i * pointsPerCycle / sendPoints;
             sample = data[b];
         }
-        else{
+        else if(cnt<6){
         uint16_t b = 1.0 * i * pointsPerCycle / sendPoints;
         if (i % cnt == 0) {
             // 实际数据
-            sample = data[b];
+            sample = data[b+1];
+            if(i==0)
+                sample = data[b];
         } else{
             // 用平均值填充剩余的点
             int a =data[b+1] - data[b];
@@ -840,6 +866,19 @@ void HMI_SendFullWave(uint8_t channel, int16_t *data, uint32_t count,
             sample = 1.0 * a/cnt*c+data[b];
         }
         }
+        else{
+        cnt = sendPoints/pointsPerCycle;
+        if (i % cnt == 0) {
+            // 实际数据
+            sample = data[i/cnt];
+        } else{
+            // 用平均值填充剩余的点
+            int a =data[i/cnt+1] - data[i/cnt];
+            int c =i%cnt;
+            sample = a/cnt*c+data[i/cnt];
+        }
+        }
+
         // 归一化到 0~255
         uint8_t normalized = 255.0 * (sample - minVal) / (maxVal - minVal);
         sprintf(txBuf, "add s0.id,0,%d", normalized);
