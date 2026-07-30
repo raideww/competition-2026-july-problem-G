@@ -69,21 +69,28 @@ TIMER1.event1PublisherChannel      = 1;
 TIMER1.event1ControllerInterruptEn = ["ZERO_EVENT"];
 TIMER1.peripheral.$assign          = "TIMG0";
 
-UART1.$name                    = "UART_0";
-UART1.targetBaudRate           = 115200;
-UART1.enabledInterrupts        = ["RX"];
-UART1.peripheral.rxPin.$assign = "PA11";
-UART1.peripheral.txPin.$assign = "PA10";
-UART1.txPinConfig.$name        = "ti_driverlib_gpio_GPIOPinGeneric1";
-UART1.rxPinConfig.$name        = "ti_driverlib_gpio_GPIOPinGeneric2";
+UART1.$name                       = "UART_0";
+UART1.targetBaudRate              = 115200;
+UART1.enabledInterrupts           = ["DMA_DONE_RX"];
+UART1.enabledDMARXTriggers        = "DL_UART_DMA_INTERRUPT_RX";
+UART1.peripheral.rxPin.$assign    = "PA11";
+UART1.peripheral.txPin.$assign    = "PA10";
+UART1.txPinConfig.$name           = "ti_driverlib_gpio_GPIOPinGeneric1";
+UART1.rxPinConfig.$name           = "ti_driverlib_gpio_GPIOPinGeneric2";
+UART1.DMA_CHANNEL_RX.$name        = "DMA_CH1";
+UART1.DMA_CHANNEL_RX.addressMode  = "f2b";
+UART1.DMA_CHANNEL_RX.srcLength    = "BYTE";
+UART1.DMA_CHANNEL_RX.dstLength    = "BYTE";
+UART1.DMA_CHANNEL_RX.transferMode = "FULL_CH_REPEAT_SINGLE";
 
 /**
  * Pinmux solution for unlocked pins/peripherals. This ensures that minor changes to the automatic solver in a future
  * version of the tool will not impact the pinmux you originally saw.  These lines can be completely deleted in order to
  * re-solve from scratch.
  */
-pinFunction4.peripheral.$suggestSolution   = "SYSCTL";
-Board.peripheral.$suggestSolution          = "DEBUGSS";
-Board.peripheral.swclkPin.$suggestSolution = "PA20";
-Board.peripheral.swdioPin.$suggestSolution = "PA19";
-UART1.peripheral.$suggestSolution          = "UART0";
+pinFunction4.peripheral.$suggestSolution         = "SYSCTL";
+Board.peripheral.$suggestSolution                = "DEBUGSS";
+Board.peripheral.swclkPin.$suggestSolution       = "PA20";
+Board.peripheral.swdioPin.$suggestSolution       = "PA19";
+UART1.peripheral.$suggestSolution                = "UART0";
+UART1.DMA_CHANNEL_RX.peripheral.$suggestSolution = "DMA_CH1";

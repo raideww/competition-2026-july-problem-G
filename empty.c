@@ -3,6 +3,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 
 #include "ti_msp_dl_config.h"
 
@@ -57,12 +58,30 @@ void HMI_SendFullWave(uint8_t channel, int16_t *data, uint32_t count,uint32_t fr
 #define RX_END_MARKER       0xFF    // 结束符
 
 // 接收缓冲区
-char rxBuffer[UART_RX_BUF_SIZE];
+char rxBuffer = 0;
 uint16_t rxIndex = 0;
 bool rxCommandReady = false;        // 收到完整指令的标志
 
 // 用于检测 \xff\xff\xff
 uint8_t ffCount = 0;               // 连续收到FF的次数
+uint8_t fecount = 0;
+
+// DMA接收缓冲区（两个，做Ping-Pong）
+#define UART_PACKET_SIZE 12
+uint8_t gRxPacket[UART_PACKET_SIZE];
+volatile uint8_t gCheckUART = 0;
+// 这个volatile不能删除，要不然编译器把这个变量给优化了
+uint32_t number_rx = 0;
+
+
+void Uart_DMA_init() {
+  DL_DMA_disableChannel(DMA, DMA_CH1_CHAN_ID);
+  DL_DMA_setSrcAddr(DMA, DMA_CH1_CHAN_ID, (uint32_t)(&UART_0_INST->RXDATA));
+  DL_DMA_setDestAddr(DMA, DMA_CH1_CHAN_ID, (uint32_t)&gRxPacket[0]);
+  DL_DMA_setTransferSize(DMA, DMA_CH1_CHAN_ID, UART_PACKET_SIZE);
+  DL_DMA_enableChannel(DMA, DMA_CH1_CHAN_ID);
+  NVIC_EnableIRQ(UART_0_INST_INT_IRQN);
+}
 
 static uint32_t getHarmonicOrder(
     uint32_t frequencyHz, uint32_t fundamentalHz)
@@ -154,7 +173,7 @@ void captureAndProcessSamples(void)
         __WFE();
     }
 
-    HMI_SendFullWave(0, gADCSamples, SAMPLE_COUNT,gFundamentalFrequencyHz, SAMPLE_RATE_HZ, 296);
+    HMI_SendFullWave(0, gADCSamples, SAMPLE_COUNT,gFundamentalFrequencyHz, SAMPLE_RATE_HZ, 400);
     int32_t sum = 0;
     for (int32_t i = 0; i < SAMPLE_COUNT; i++) {
         sum += gADCSamples[i];
@@ -662,6 +681,8 @@ int main(void)
     NVIC_ClearPendingIRQ(ADC12_0_INST_INT_IRQN);
     NVIC_EnableIRQ(ADC12_0_INST_INT_IRQN);
 
+    Uart_DMA_init();
+
     while (1) {
         captureAndProcessSamples();
         for(int j = 0 ; j < 9 ; j++)
@@ -716,6 +737,9 @@ int main(void)
                     break;
             }
         }
+        if (rxCommandReady) {
+        rxCommandReady = false;
+    }
         DL_Common_delayCycles(CPUCLK_FREQ);
     }
 }
@@ -769,7 +793,8 @@ void HMI_SendFullWave(uint8_t channel, int16_t *data, uint32_t count,
     if (pointsPerCycle > count) {
         pointsPerCycle = count;
     }
-    
+    if(rxBuffer == 3)
+        pointsPerCycle *= 3;
     // 2. 计算需要发送的点数（填满控件）
     uint32_t sendPoints = controlWidth;
     
@@ -789,23 +814,54 @@ void HMI_SendFullWave(uint8_t channel, int16_t *data, uint32_t count,
     }
     
     // 6. 生成发送数据
+    uint8_t cnt = sendPoints/pointsPerCycle;
+    int16_t sample;
     for (uint32_t i = 0; i < sendPoints; i++) {
-        int16_t sample;
-        uint8_t cnt = sendPoints/pointsPerCycle;
+        if(cnt == 0)
+        {
+            float a = 1.0 * pointsPerCycle / sendPoints;
+            uint16_t b = a*i;
+            sample = data[b];
+        }
+        else if(cnt == 1)
+        {
+            uint16_t b = 1.0 * i * pointsPerCycle / sendPoints;
+            sample = data[b];
+        }
+        else{
+        uint16_t b = 1.0 * i * pointsPerCycle / sendPoints;
         if (i % cnt == 0) {
             // 实际数据
-            sample = data[i/cnt];
+            sample = data[b];
         } else{
             // 用平均值填充剩余的点
-            int a =data[i/cnt+1] - data[i/cnt];
-            int c =i%cnt;
-            sample = a/cnt*c+data[i/cnt];
+            int a =data[b+1] - data[b];
+            float c =fmod(1.0*i,(1.0*sendPoints/pointsPerCycle));
+            sample = 1.0 * a/cnt*c+data[b];
         }
-        
+        }
         // 归一化到 0~255
         uint8_t normalized = 255.0 * (sample - minVal) / (maxVal - minVal);
         sprintf(txBuf, "add s0.id,0,%d", normalized);
         strcat(txBuf, "\xff\xff\xff");
         UART_SendString(txBuf);
+    }
+}
+
+/**
+ * @brief UART接收中断处理
+ * 每个字节收到后都会触发
+ */
+
+void UART_0_INST_IRQHandler(void) {
+    for(int i = 0 ; i < 12 ; i++)
+    {
+        if(gRxPacket[i]==0xFE)
+            continue;
+        if(i>0)
+        {
+            if(gRxPacket[i-1] == 0xFE)
+                rxBuffer = gRxPacket[i];
+        }
     }
 }
