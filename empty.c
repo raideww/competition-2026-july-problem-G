@@ -2,6 +2,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 
 #include "ti_msp_dl_config.h"
 
@@ -48,8 +49,9 @@ uint16_t gSpectrumAmplitudeMillivolts[MAX_SPECTRAL_COMPONENTS];
 volatile bool gSamplesReady = false;
 static volatile bool gCaptureComplete = false;
 
-char txBuf[32];
+char txBuf[64];
 void HMI_AddWave(uint32_t value,uint8_t vvs,uint8_t j);
+void HMI_SendFullWave(uint8_t channel, int16_t *data, uint32_t count,uint32_t freq, uint32_t sampleRate, uint32_t controlWidth);
 
 static uint32_t getHarmonicOrder(
     uint32_t frequencyHz, uint32_t fundamentalHz)
@@ -112,7 +114,7 @@ void captureAndProcessSamples(void)
     gCaptureComplete = false;
     gUppMillivolts = 0;
     gUrmsMillivolts = 0;
-    gFundamentalFrequencyHz = 0;
+    //gFundamentalFrequencyHz = 0;
     gSpectrumComponentCount = 0;
     for (uint32_t i = 0; i < MAX_SPECTRAL_COMPONENTS; i++) {
         gSpectrumFrequencyHz[i] = 0;
@@ -141,6 +143,7 @@ void captureAndProcessSamples(void)
         __WFE();
     }
 
+    HMI_SendFullWave(0, gADCSamples, SAMPLE_COUNT,gFundamentalFrequencyHz, SAMPLE_RATE_HZ, 296);
     int32_t sum = 0;
     for (int32_t i = 0; i < SAMPLE_COUNT; i++) {
         sum += gADCSamples[i];
@@ -625,13 +628,18 @@ void captureAndProcessSamples(void)
             sqrtf(0.5f * sumOfComponentSquares) + 0.5f);
     }
     gSamplesReady = true;
-    gUppMillivolts = (gUppMillivolts * 0.969 * 0.213 * 1.025);
-    gUppMillivolts = gUppMillivolts + ((gFundamentalFrequencyHz * gUppMillivolts)/1000000) * 0.12;
-    gUrmsMillivolts = (gUrmsMillivolts * 0.969 * 0.213 * 1.025);
-    gUrmsMillivolts = gUrmsMillivolts + ((gFundamentalFrequencyHz * gUrmsMillivolts)/1000000) * 0.12;
+    gUppMillivolts = (gUppMillivolts * 0.113);
+    gUppMillivolts = gUppMillivolts - ((gFundamentalFrequencyHz * gUppMillivolts)/1000000) * 0.06;
+    gUrmsMillivolts = (gUrmsMillivolts * 0.113 );
+    gUrmsMillivolts = gUrmsMillivolts - ((gFundamentalFrequencyHz * gUrmsMillivolts)/1000000) * 0.06;
     for(int i = 0 ; i<3 ; i++)
     {
         gSpectrumAmplitudeMillivolts[i] = gSpectrumAmplitudeMillivolts[i] / 1.92 + gFundamentalFrequencyHz * 0.0000103;
+        if(gSpectrumAmplitudeMillivolts[i]<5)
+        {
+            gSpectrumAmplitudeMillivolts[i] = 0;
+            gSpectrumFrequencyHz[i] = 0;
+        }
     }
 }
 
@@ -644,7 +652,6 @@ int main(void)
 
     while (1) {
         captureAndProcessSamples();
-
         for(int j = 0 ; j < 7 ; j++)
         {
             int value;
@@ -726,4 +733,57 @@ void HMI_AddWave(uint32_t value,uint8_t vvs,uint8_t j)
         sprintf(txBuf, "x%d.vvs1=%d\xff\xff\xff",j,vvs);
         UART_SendString(txBuf);
     //HMI_End();
+}
+
+void HMI_SendFullWave(uint8_t channel, int16_t *data, uint32_t count,
+                       uint32_t freq, uint32_t sampleRate, uint32_t controlWidth)
+{
+    if (freq == 0 || data == NULL || count == 0 || controlWidth == 0) {
+        return;
+    }
+    
+    // 1. 计算一个周期的实际点数
+    uint32_t pointsPerCycle = (uint32_t)((float)sampleRate / freq);
+    if (pointsPerCycle > count) {
+        pointsPerCycle = count;
+    }
+    
+    // 2. 计算需要发送的点数（填满控件）
+    uint32_t sendPoints = controlWidth;
+    
+    // 3. 分配缓冲区
+    if (sendPoints > 512) {
+        sendPoints = 512;   // 限制最大点数
+    }
+    // 5. 找到周期内的最大值和最小值（用于归一化）
+    int16_t minVal = data[0];
+    int16_t maxVal = data[0];
+    for (uint32_t i = 0; i < pointsPerCycle; i++) {
+        if (data[i] < minVal) minVal = data[i];
+        if (data[i] > maxVal) maxVal = data[i];
+    }
+    if (maxVal == minVal) {
+        maxVal = minVal + 1;
+    }
+    
+    // 6. 生成发送数据
+    for (uint32_t i = 0; i < sendPoints; i++) {
+        int16_t sample;
+        uint8_t cnt = sendPoints/pointsPerCycle;
+        if (i % cnt == 0) {
+            // 实际数据
+            sample = data[i/cnt];
+        } else{
+            // 用平均值填充剩余的点
+            int a =data[i/cnt+1] - data[i/cnt];
+            int c =i%cnt;
+            sample = a/cnt*c+data[i/cnt];
+        }
+        
+        // 归一化到 0~255
+        uint8_t normalized = 255.0 * (sample - minVal) / (maxVal - minVal);
+        sprintf(txBuf, "add s0.id,0,%d", normalized);
+        strcat(txBuf, "\xff\xff\xff");
+        UART_SendString(txBuf);
+    }
 }
