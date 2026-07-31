@@ -761,7 +761,7 @@ int main(void)
         if (rxCommandReady) {
         rxCommandReady = false;
     }
-        DL_Common_delayCycles(CPUCLK_FREQ);
+        //DL_Common_delayCycles(CPUCLK_FREQ);
     }
 }
 
