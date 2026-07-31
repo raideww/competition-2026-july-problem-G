@@ -642,7 +642,7 @@ for (uint32_t point = 0; point < RECONSTRUCTION_POINTS; point++) {
 
 gUppMillivolts = (uint16_t)(reconstructedMaximum - reconstructedMinimum + 0.5f);
 gUrmsMillivolts = (uint16_t)(sqrtf(0.5f * sumOfComponentSquares) + 0.5f);
-HMI_SendFullWave2(0, gSamplesMillivolts, RECONSTRUCTION_POINTS, 400);
+HMI_SendFullWave2(0, gSamplesMillivolts, RECONSTRUCTION_POINTS, 238);
 
         gUppMillivolts = (uint16_t) (
             reconstructedMaximum - reconstructedMinimum + 0.5f);
@@ -935,7 +935,7 @@ void plotSpectrum()
         diff[0] = 1.05 * (gSpectrumFrequencyHz[1]-gSpectrumFrequencyHz[0]) / gSpectrumFrequencyHz[0];
     if(gSpectrumFrequencyHz[2] != 0)
         diff[1] = 1.05 * (gSpectrumFrequencyHz[2]-gSpectrumFrequencyHz[1]) / gSpectrumFrequencyHz[0];
-    for(int j = 0 ; j<10 ; j++)
+    for(int j = 0 ; j<5 ; j++)
         {
             sprintf(txBuf, "add s1.id,0,%d", 0);
             strcat(txBuf, "\xff\xff\xff");
@@ -949,7 +949,7 @@ void plotSpectrum()
         }
         else 
             break;
-        for(int j = 0 ; j < 5 ; j++)
+        for(int j = 0 ; j < 3 ; j++)
         {
             sprintf(txBuf, "add s1.id,0,%d", 0);
             strcat(txBuf, "\xff\xff\xff");
@@ -960,7 +960,7 @@ void plotSpectrum()
         }
         if(i<2){
         for(int k = 0 ; k < diff[i] ; k++){
-        for(int j = 0 ; j<17 ; j++)
+        for(int j = 0 ; j<10 ; j++)
         {
             sprintf(txBuf, "add s1.id,0,%d", 0);
             strcat(txBuf, "\xff\xff\xff");
