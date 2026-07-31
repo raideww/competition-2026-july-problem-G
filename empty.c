@@ -148,7 +148,7 @@ void captureAndProcessSamples(void)
     };
     enum {
         FIRST_SPECTRUM_BIN = 10,
-        LAST_SPECTRUM_BIN = 512,
+        LAST_SPECTRUM_BIN = 1024,
         PEAK_SEPARATION_BINS = 8,
         MIN_SPECTRAL_AMPLITUDE_MV = 1,
         RECONSTRUCTION_POINTS = 2048
