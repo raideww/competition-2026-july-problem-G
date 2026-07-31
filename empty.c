@@ -18,8 +18,8 @@
 /* Measured ADC-path gain correction: 0.980, represented exactly. */
 #define INPUT_VOLTAGE_CALIBRATION_NUMERATOR   (980)
 #define INPUT_VOLTAGE_CALIBRATION_DENOMINATOR (1000)
-#define FRONT_END_AMPLITUDE_SCALE             (0.118f)
-#define FRONT_END_SCALE_SLOPE_PER_MHZ         (0.08f)
+#define FRONT_END_AMPLITUDE_SCALE             (0.1506f) // mv = mv * 0.118
+#define FRONT_END_SCALE_SLOPE_PER_MHZ         (0.08f) // mv = mv - freq * mv /1000000 * 0.08
 #define HERTZ_PER_MEGAHERTZ                   (1000000.0f)
 #define MIN_REPORTED_COMPONENT_AMPLITUDE_MV   (5U)
 #define MAX_SPECTRAL_COMPONENTS (3U)
@@ -717,47 +717,51 @@ int main(void)
                 case 0:
                     value = gUppMillivolts;
                     HMI_AddWave(value,0,j);
-                    DL_Common_delayCycles(3200);
+                    //DL_Common_delayCycles(3200);
                     break;
                 case 1:
                     value = gUrmsMillivolts;
                     HMI_AddWave(value,0,j);
-                    DL_Common_delayCycles(3200);
+                    //DL_Common_delayCycles(3200);
                     break;
                 case 2:
                     value = gFundamentalFrequencyHz;
-                    HMI_AddWave(value,3,j);
-                    DL_Common_delayCycles(3200);
+                    value /= 100;
+                    HMI_AddWave(value,1,j);
+                    //DL_Common_delayCycles(3200);
                     break;
                 case 3:
                     value = gSpectrumFrequencyHz[1];
-                    HMI_AddWave(value,3,j);
-                    DL_Common_delayCycles(3200);
+                    value /= 100;
+                    HMI_AddWave(value,1,j);
+                    //DL_Common_delayCycles(3200);
                     break;
                 case 4:
                     value = gSpectrumAmplitudeMillivolts[1];
                     HMI_AddWave(value,0,j);
-                    DL_Common_delayCycles(3200);
+                    //DL_Common_delayCycles(3200);
                     break;
                 case 5:
                     value = gSpectrumFrequencyHz[2];
-                    HMI_AddWave(value,3,j);
-                    DL_Common_delayCycles(3200);
+                    value /= 100;
+                    HMI_AddWave(value,1,j);
+                    //DL_Common_delayCycles(3200);
                     break;
                 case 6:
                     value = gSpectrumAmplitudeMillivolts[2];
                     HMI_AddWave(value,0,j);
-                    DL_Common_delayCycles(3200);
+                    //DL_Common_delayCycles(3200);
                     break;
                 case 7:
                     value = gSpectrumFrequencyHz[0];
-                    HMI_AddWave(value,3,j);
-                    DL_Common_delayCycles(3200);
+                    value /= 100;
+                    HMI_AddWave(value,1,j);
+                    //DL_Common_delayCycles(3200);
                     break;
                 case 8:
                     value = gSpectrumAmplitudeMillivolts[0];
                     HMI_AddWave(value,0,j);
-                    DL_Common_delayCycles(3200);
+                    //DL_Common_delayCycles(3200);
                     break;
             }
         }
@@ -783,7 +787,7 @@ void UART_SendString(char *str)
     while (*str)
     {
         DL_UART_Main_transmitData(UART_0_INST, *str++);
-        DL_Common_delayCycles(5000);
+        DL_Common_delayCycles(3500);
     }
 }
 
