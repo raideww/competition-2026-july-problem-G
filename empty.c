@@ -38,9 +38,9 @@ _Static_assert(CPUCLK_FREQ == SAMPLE_TIMER_CLOCK_HZ,
 _Static_assert(
     (SAMPLE_TIMER_CLOCK_HZ % SAMPLE_TIMER_TICKS_PER_SAMPLE) == 0UL,
     "sampling timer period must produce an integer sample rate");
-_Static_assert(SAMPLE_RATE_HZ == 2000000UL,
+_Static_assert(SAMPLE_RATE_HZ == 4000000UL,
     "sampling timer changed: update FFT frequency limits and scaling");
-_Static_assert(SAMPLE_RATE_HZ <= (SAMPLE_COUNT * 500UL),
+_Static_assert(SAMPLE_RATE_HZ <= (SAMPLE_COUNT * 1000UL),
     "FFT bin spacing must not exceed 500 Hz");
 
 int16_t gADCSamples[SAMPLE_COUNT];
@@ -147,8 +147,8 @@ void captureAndProcessSamples(void)
           -13176464,    -6588356,   -3294193,   -1647099
     };
     enum {
-        FIRST_SPECTRUM_BIN = 20,
-        LAST_SPECTRUM_BIN = 1024,
+        FIRST_SPECTRUM_BIN = 10,
+        LAST_SPECTRUM_BIN = 512,
         PEAK_SEPARATION_BINS = 8,
         MIN_SPECTRAL_AMPLITUDE_MV = 1,
         RECONSTRUCTION_POINTS = 2048
@@ -418,7 +418,7 @@ void captureAndProcessSamples(void)
         }
         uint32_t frequencyHz = (uint32_t) (
             ((bin + fractionalBin) * SAMPLE_RATE_HZ / SAMPLE_COUNT) +
-            0.5f);
+            0.5f)/2;
         if (frequencyHz < MIN_SPECTRUM_FREQUENCY_HZ) {
             frequencyHz = MIN_SPECTRUM_FREQUENCY_HZ;
         } else if (frequencyHz > MAX_SPECTRUM_FREQUENCY_HZ) {

@@ -76,7 +76,7 @@ TIMER1.$name                       = "SAMPLE_TIMER";
 TIMER1.timerMode                   = "PERIODIC";
 TIMER1.event1PublisherChannel      = 1;
 TIMER1.event1ControllerInterruptEn = ["ZERO_EVENT"];
-TIMER1.timerPeriod                 = "500ns";
+TIMER1.timerPeriod                 = "250ns";
 TIMER1.peripheral.$assign          = "TIMG0";
 
 UART1.$name                       = "UART_0";
