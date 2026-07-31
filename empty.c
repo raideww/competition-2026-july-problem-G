@@ -19,8 +19,9 @@
 #define INPUT_VOLTAGE_CALIBRATION_NUMERATOR   (980)
 #define INPUT_VOLTAGE_CALIBRATION_DENOMINATOR (1000)
 #define FRONT_END_AMPLITUDE_SCALE             (0.1366f) // mv = mv * 0.118
-#define FRONT_END_AMPLITUDE_SCALE_THIRD       (1.0806f)
+#define FRONT_END_AMPLITUDE_SCALE_THIRD       (1.124f)
 #define FRONT_END_SCALE_SLOPE_PER_MHZ         (0.08f) // mv = mv - freq * mv /1000000 * 0.08
+#define FRONT_END_SCALE_SLOPE_PER_MHZ_THIRD         (0.0831f)
 #define HERTZ_PER_MEGAHERTZ                   (1000000.0f)
 #define MIN_REPORTED_COMPONENT_AMPLITUDE_MV   (5U)
 #define MAX_SPECTRAL_COMPONENTS (3U)
@@ -29,7 +30,7 @@
 #define HARMONIC_TOLERANCE_HZ      (1000UL)
 #define MAX_HARMONIC_ORDER \
     (MAX_SPECTRUM_FREQUENCY_HZ / MIN_SPECTRUM_FREQUENCY_HZ)
-#define TWO_LINE_MIN_FUNDAMENTAL_AMPLITUDE_MV (2U)
+#define TWO_LINE_MIN_FUNDAMENTAL_AMPLITUDE_MV (5U)
 #define TWO_LINE_MAX_AMPLITUDE_RATIO          (32U)
 
 /* TIMG0 is explicitly locked to the 40 MHz HFXT BUSCLK in empty.syscfg. */
@@ -60,6 +61,7 @@ void HMI_AddWave(uint32_t value,uint8_t vvs,uint8_t j);
 void HMI_SendFullWave(uint8_t channel, int16_t *data, uint32_t count,uint32_t freq, uint32_t sampleRate, uint32_t controlWidth);
 void plotSpectrum();
 void UART_SendString(char *str);
+void HMI_SendFullWave2(uint8_t channel, int16_t *data, uint32_t sampleRate, uint32_t controlWidth);
 
 #define UART_RX_BUF_SIZE    32     // 接收缓冲区大小
 #define RX_END_MARKER       0xFF    // 结束符
@@ -150,7 +152,7 @@ void captureAndProcessSamples(void)
         FIRST_SPECTRUM_BIN = 10,
         LAST_SPECTRUM_BIN = 1024,
         PEAK_SEPARATION_BINS = 8,
-        MIN_SPECTRAL_AMPLITUDE_MV = 1,
+        MIN_SPECTRAL_AMPLITUDE_MV = 5,
         RECONSTRUCTION_POINTS = 2048
     };
 
@@ -189,7 +191,7 @@ void captureAndProcessSamples(void)
         __WFE();
     }
 
-    HMI_SendFullWave(0, gADCSamples, SAMPLE_COUNT,gFundamentalFrequencyHz, SAMPLE_RATE_HZ, 400);
+    //HMI_SendFullWave(0, gADCSamples, SAMPLE_COUNT,gFundamentalFrequencyHz, SAMPLE_RATE_HZ, 400);
     int32_t sum = 0;
     for (int32_t i = 0; i < SAMPLE_COUNT; i++) {
         sum += gADCSamples[i];
@@ -471,6 +473,20 @@ void captureAndProcessSamples(void)
          * then accept a lower candidate only when it is strong enough and
          * explains more selected lines as integer harmonics.
          */
+         if (gSpectrumAmplitudeMillivolts[0] < MIN_REPORTED_COMPONENT_AMPLITUDE_MV) {
+        // 基波太弱，当作无信号处理
+        gSpectrumComponentCount = 0;
+        gFundamentalFrequencyHz = 0;
+        for (int i = 0; i < MAX_SPECTRAL_COMPONENTS; i++) {
+            gSpectrumFrequencyHz[i] = 0;
+            gSpectrumAmplitudeMillivolts[i] = 0;
+        }
+        // 执行 fallback 处理
+        float baseScale = getFrontEndAmplitudeScale(0U);
+        gUppMillivolts = (uint16_t)((float)gUppMillivolts * baseScale + 0.5f);
+        gUrmsMillivolts = (uint16_t)((float)gUrmsMillivolts * baseScale + 0.5f);
+    }
+    else{
         uint32_t strongestIndex = 0U;
         for (uint32_t i = 1U; i < gSpectrumComponentCount; i++) {
             if (gSpectrumAmplitudeMillivolts[i] >
@@ -572,119 +588,68 @@ void captureAndProcessSamples(void)
         gSpectrumComponentCount = (uint8_t) validComponentCount;
 
         /* Recover each line's phase from the preserved time samples. */
-        float componentCos[MAX_SPECTRAL_COMPONENTS] = {0.0f};
-        float componentSin[MAX_SPECTRAL_COMPONENTS] = {0.0f};
-        float oscillatorCos[MAX_SPECTRAL_COMPONENTS];
-        float oscillatorSin[MAX_SPECTRAL_COMPONENTS];
-        float stepCos[MAX_SPECTRAL_COMPONENTS];
-        float stepSin[MAX_SPECTRAL_COMPONENTS];
-        const float twoPi = 6.28318530718f;
+/* 相位固定为0，直接用幅值重构 */
+float componentCos[MAX_SPECTRAL_COMPONENTS] = {0.0f};
+float componentSin[MAX_SPECTRAL_COMPONENTS] = {0.0f};
+float oscillatorCos[MAX_SPECTRAL_COMPONENTS];
+float oscillatorSin[MAX_SPECTRAL_COMPONENTS];
+float stepCos[MAX_SPECTRAL_COMPONENTS];
+float stepSin[MAX_SPECTRAL_COMPONENTS];
+const float twoPi = 6.28318530718f;
 
-        for (uint32_t i = 0; i < gSpectrumComponentCount; i++) {
-            float angle = twoPi * gSpectrumFrequencyHz[i] /
-                          SAMPLE_RATE_HZ;
-            oscillatorCos[i] = 1.0f;
-            oscillatorSin[i] = 0.0f;
-            stepCos[i] = cosf(angle);
-            stepSin[i] = sinf(angle);
-        }
+// 相位固定为0：Cos = 幅值，Sin = 0
+float sumOfComponentSquares = 0.0f;
+for (uint32_t i = 0; i < gSpectrumComponentCount; i++) {
+    float phaseDeg = 90.0f;  // ← 改这个数字！单位：度
+    float phaseRad = phaseDeg * 3.14159265f / 180.0f;
 
-        windowCosQ30 = 1073741824;
-        windowSinQ30 = 0;
-        for (uint32_t sample = 0; sample < SAMPLE_COUNT; sample++) {
-            int32_t windowQ15 =
-                (int32_t) ((1073741824LL - windowCosQ30) >> 16);
-            if (windowQ15 < 0) {
-                windowQ15 = 0;
-            } else if (windowQ15 > 32767) {
-                windowQ15 = 32767;
-            }
-            float windowedSample =
-                (float) gSamplesMillivolts[sample] * windowQ15 / 32768.0f;
+    componentCos[i] = calibratedPeakMillivolts[i] * cosf(phaseRad);
+    componentSin[i] = calibratedPeakMillivolts[i] * sinf(phaseRad);
+    sumOfComponentSquares += calibratedPeakMillivolts[i] * calibratedPeakMillivolts[i];
+    
+    // 计算重构用的步长（一个基波周期，各谐波振荡 harmonic 次）
+    uint32_t harmonic = (gSpectrumFrequencyHz[i] + (gFundamentalFrequencyHz / 2)) / gFundamentalFrequencyHz;
+    if (harmonic == 0) harmonic = 1;
+    float angle = twoPi * harmonic / RECONSTRUCTION_POINTS;
+    oscillatorCos[i] = 1.0f;
+    oscillatorSin[i] = 0.0f;
+    stepCos[i] = cosf(angle);
+    stepSin[i] = sinf(angle);
+}
 
-            for (uint32_t i = 0; i < gSpectrumComponentCount; i++) {
-                componentCos[i] += windowedSample * oscillatorCos[i];
-                componentSin[i] += windowedSample * oscillatorSin[i];
-                float nextOscillatorCos =
-                    oscillatorCos[i] * stepCos[i] -
-                    oscillatorSin[i] * stepSin[i];
-                oscillatorSin[i] =
-                    oscillatorSin[i] * stepCos[i] +
-                    oscillatorCos[i] * stepSin[i];
-                oscillatorCos[i] = nextOscillatorCos;
-            }
+// 重构循环（修改：同时使用 Cos 和 Sin 分量）
+float reconstructedMinimum = 0.0f;
+float reconstructedMaximum = 0.0f;
+for (uint32_t point = 0; point < RECONSTRUCTION_POINTS; point++) {
+    float reconstructedSample = 0.0f;
+    for (uint32_t i = 0; i < gSpectrumComponentCount; i++) {
+        // 关键修改：同时使用 Cos 和 Sin 分量
+        reconstructedSample += componentCos[i] * oscillatorCos[i] + componentSin[i] * oscillatorSin[i];
+        
+        // 更新振荡器
+        float nextOscillatorCos = oscillatorCos[i] * stepCos[i] - oscillatorSin[i] * stepSin[i];
+        oscillatorSin[i] = oscillatorSin[i] * stepCos[i] + oscillatorCos[i] * stepSin[i];
+        oscillatorCos[i] = nextOscillatorCos;
+    }
+    if (point == 0 || reconstructedSample < reconstructedMinimum) {
+        reconstructedMinimum = reconstructedSample;
+    }
+    if (point == 0 || reconstructedSample > reconstructedMaximum) {
+        reconstructedMaximum = reconstructedSample;
+    }
+    gSamplesMillivolts[point] = (int16_t)(reconstructedSample + 0.5f);
+}
 
-            int64_t nextWindowCos =
-                (int64_t) windowCosQ30 * 1073740561 -
-                (int64_t) windowSinQ30 * 1647099;
-            int64_t nextWindowSin =
-                (int64_t) windowSinQ30 * 1073740561 +
-                (int64_t) windowCosQ30 * 1647099;
-            windowCosQ30 =
-                (int32_t) ((nextWindowCos + (1LL << 29)) >> 30);
-            windowSinQ30 =
-                (int32_t) ((nextWindowSin + (1LL << 29)) >> 30);
-        }
-
-        float sumOfComponentSquares = 0.0f;
-        for (uint32_t i = 0; i < gSpectrumComponentCount; i++) {
-            float phaseLength = sqrtf(componentCos[i] * componentCos[i] +
-                                      componentSin[i] * componentSin[i]);
-            float amplitude = calibratedPeakMillivolts[i];
-            if (phaseLength > 0.0f) {
-                componentCos[i] *= amplitude / phaseLength;
-                componentSin[i] *= amplitude / phaseLength;
-            } else {
-                componentCos[i] = amplitude;
-                componentSin[i] = 0.0f;
-            }
-            sumOfComponentSquares += amplitude * amplitude;
-
-            uint32_t harmonic =
-                (gSpectrumFrequencyHz[i] +
-                 (gFundamentalFrequencyHz / 2)) /
-                gFundamentalFrequencyHz;
-            if (harmonic == 0) {
-                harmonic = 1;
-            }
-            float angle = twoPi * harmonic / RECONSTRUCTION_POINTS;
-            oscillatorCos[i] = 1.0f;
-            oscillatorSin[i] = 0.0f;
-            stepCos[i] = cosf(angle);
-            stepSin[i] = sinf(angle);
-        }
-
-        float reconstructedMinimum = 0.0f;
-        float reconstructedMaximum = 0.0f;
-        for (uint32_t point = 0; point < RECONSTRUCTION_POINTS; point++) {
-            float reconstructedSample = 0.0f;
-            for (uint32_t i = 0; i < gSpectrumComponentCount; i++) {
-                reconstructedSample +=
-                    componentCos[i] * oscillatorCos[i] +
-                    componentSin[i] * oscillatorSin[i];
-                float nextOscillatorCos =
-                    oscillatorCos[i] * stepCos[i] -
-                    oscillatorSin[i] * stepSin[i];
-                oscillatorSin[i] =
-                    oscillatorSin[i] * stepCos[i] +
-                    oscillatorCos[i] * stepSin[i];
-                oscillatorCos[i] = nextOscillatorCos;
-            }
-            if ((point == 0) ||
-                (reconstructedSample < reconstructedMinimum)) {
-                reconstructedMinimum = reconstructedSample;
-            }
-            if ((point == 0) ||
-                (reconstructedSample > reconstructedMaximum)) {
-                reconstructedMaximum = reconstructedSample;
-            }
-        }
+gUppMillivolts = (uint16_t)(reconstructedMaximum - reconstructedMinimum + 0.5f);
+gUrmsMillivolts = (uint16_t)(sqrtf(0.5f * sumOfComponentSquares) + 0.5f);
+HMI_SendFullWave2(0, gSamplesMillivolts, RECONSTRUCTION_POINTS, 400);
 
         gUppMillivolts = (uint16_t) (
             reconstructedMaximum - reconstructedMinimum + 0.5f);
         gUrmsMillivolts = (uint16_t) (
             sqrtf(0.5f * sumOfComponentSquares) + 0.5f);
-    } else {
+    } 
+    }else {
         /* No frequency estimate is available for the fallback measurements. */
         float baseScale = getFrontEndAmplitudeScale(0U);
         gUppMillivolts = (uint16_t) (
@@ -703,13 +668,17 @@ void captureAndProcessSamples(void)
     if(switch_12_3)
     {
         gUppMillivolts *= FRONT_END_AMPLITUDE_SCALE_THIRD;
+        gUppMillivolts += FRONT_END_SCALE_SLOPE_PER_MHZ_THIRD * gSpectrumFrequencyHz[0] * gSpectrumFrequencyHz[0] * 0.000000001;
+        gUrmsMillivolts *= FRONT_END_AMPLITUDE_SCALE_THIRD;
+        gUrmsMillivolts += FRONT_END_SCALE_SLOPE_PER_MHZ_THIRD * gSpectrumFrequencyHz[0] * gSpectrumFrequencyHz[0] * 0.000000001 ;
         for(int i = 0 ; i < 3 ; i++)
         {
             gSpectrumAmplitudeMillivolts[i] *= FRONT_END_AMPLITUDE_SCALE_THIRD;
+            gSpectrumAmplitudeMillivolts[i] += FRONT_END_SCALE_SLOPE_PER_MHZ_THIRD * gSpectrumFrequencyHz[i] * gSpectrumFrequencyHz[i] *0.000000001 * gSpectrumAmplitudeMillivolts[i] * 0.01;
         }
         if(gSpectrumAmplitudeMillivolts[1] != 0)
         {
-            float a = 0.205 * sqrt(gSpectrumAmplitudeMillivolts[1]*gSpectrumAmplitudeMillivolts[1] + gSpectrumAmplitudeMillivolts[2]*gSpectrumAmplitudeMillivolts[2])/gSpectrumAmplitudeMillivolts[0];
+            float a = 0 * sqrt(gSpectrumAmplitudeMillivolts[1]*gSpectrumAmplitudeMillivolts[1] + gSpectrumAmplitudeMillivolts[2]*gSpectrumAmplitudeMillivolts[2])/gSpectrumAmplitudeMillivolts[0];
             for(int i = 0 ; i < 3 ; i++)
             {
                 gSpectrumAmplitudeMillivolts[i] *= (1 + a) * (1 + a);
@@ -831,6 +800,45 @@ void HMI_AddWave(uint32_t value,uint8_t vvs,uint8_t j)
         sprintf(txBuf, "x%d.vvs1=%d\xff\xff\xff",j,vvs);
         UART_SendString(txBuf);
     //HMI_End();
+}
+
+void HMI_SendFullWave2(uint8_t channel, int16_t *data, uint32_t sampleRate, uint32_t controlWidth)
+{
+    static uint8_t a = 0;
+    static uint8_t a_last = 0;
+        // 找到周期内的最大值和最小值（用于归一化）
+    int16_t minVal = data[0];
+    int16_t maxVal = data[0];
+    for (uint32_t i = 0; i < sampleRate; i++) {
+        if (data[i] < minVal) minVal = data[i];
+        if (data[i] > maxVal) maxVal = data[i];
+    }
+    if (maxVal == minVal) {
+        maxVal = minVal + 1;
+    }
+    if(rxBuffer == 3)
+    {
+        sampleRate *= 3;
+    }
+    float cnt = 1.0 * sampleRate / controlWidth;
+    int j = 0;
+    for(int i = 0 ; i < sampleRate ; i++)
+    {
+        j++;
+        if(j == 2048)
+            j=0;
+        a = j/cnt;
+        if(a == a_last)
+            continue;
+        else
+        {
+            uint8_t normalized = 255.0 * (data[j] - minVal) / (maxVal - minVal);
+            sprintf(txBuf, "add s0.id,0,%d", normalized);
+            strcat(txBuf, "\xff\xff\xff");
+            UART_SendString(txBuf);
+            a_last = a;
+        }
+    }
 }
 
 void HMI_SendFullWave(uint8_t channel, int16_t *data, uint32_t count,
