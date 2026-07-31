@@ -11,6 +11,8 @@
  */
 const ADC12  = scripting.addModule("/ti/driverlib/ADC12", {}, false);
 const ADC121 = ADC12.addInstance();
+const GPIO   = scripting.addModule("/ti/driverlib/GPIO", {}, false);
+const GPIO1  = GPIO.addInstance();
 const SYSCTL = scripting.addModule("/ti/driverlib/SYSCTL");
 const TIMER  = scripting.addModule("/ti/driverlib/TIMER", {}, false);
 const TIMER1 = TIMER.addInstance();
@@ -57,6 +59,14 @@ ADC121.DMA_CHANNEL.dstLength          = "HALF_WORD";
 ADC121.DMA_CHANNEL.peripheral.$assign = "DMA_CH0";
 
 const Board = scripting.addModule("/ti/driverlib/Board", {}, false);
+
+GPIO1.$name                         = "GPIO_GRP_0";
+GPIO1.port                          = "PORTA";
+GPIO1.associatedPins.create(2);
+GPIO1.associatedPins[0].$name       = "PIN_0";
+GPIO1.associatedPins[0].pin.$assign = "PA12";
+GPIO1.associatedPins[1].$name       = "PIN_1";
+GPIO1.associatedPins[1].pin.$assign = "PA13";
 
 SYSCTL.forceDefaultClkConfig = true;
 SYSCTL.validateClkStatus     = true;

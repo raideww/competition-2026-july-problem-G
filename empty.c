@@ -18,7 +18,8 @@
 /* Measured ADC-path gain correction: 0.980, represented exactly. */
 #define INPUT_VOLTAGE_CALIBRATION_NUMERATOR   (980)
 #define INPUT_VOLTAGE_CALIBRATION_DENOMINATOR (1000)
-#define FRONT_END_AMPLITUDE_SCALE             (0.1506f) // mv = mv * 0.118
+#define FRONT_END_AMPLITUDE_SCALE             (0.1366f) // mv = mv * 0.118
+#define FRONT_END_AMPLITUDE_SCALE_THIRD       (1.0806f)
 #define FRONT_END_SCALE_SLOPE_PER_MHZ         (0.08f) // mv = mv - freq * mv /1000000 * 0.08
 #define HERTZ_PER_MEGAHERTZ                   (1000000.0f)
 #define MIN_REPORTED_COMPONENT_AMPLITUDE_MV   (5U)
@@ -57,6 +58,8 @@ static volatile bool gCaptureComplete = false;
 char txBuf[64];
 void HMI_AddWave(uint32_t value,uint8_t vvs,uint8_t j);
 void HMI_SendFullWave(uint8_t channel, int16_t *data, uint32_t count,uint32_t freq, uint32_t sampleRate, uint32_t controlWidth);
+void plotSpectrum();
+void UART_SendString(char *str);
 
 #define UART_RX_BUF_SIZE    32     // 接收缓冲区大小
 #define RX_END_MARKER       0xFF    // 结束符
@@ -76,6 +79,8 @@ uint8_t gRxPacket[UART_PACKET_SIZE];
 volatile uint8_t gCheckUART = 0;
 // 这个volatile不能删除，要不然编译器把这个变量给优化了
 uint32_t number_rx = 0;
+
+bool switch_12_3 = 0;
 
 
 void Uart_DMA_init() {
@@ -695,6 +700,25 @@ void captureAndProcessSamples(void)
             gSpectrumFrequencyHz[i] = 0U;
         }
     }
+    if(switch_12_3)
+    {
+        gUppMillivolts *= FRONT_END_AMPLITUDE_SCALE_THIRD;
+        for(int i = 0 ; i < 3 ; i++)
+        {
+            gSpectrumAmplitudeMillivolts[i] *= FRONT_END_AMPLITUDE_SCALE_THIRD;
+        }
+        if(gSpectrumAmplitudeMillivolts[1] != 0)
+        {
+            float a = 0.205 * sqrt(gSpectrumAmplitudeMillivolts[1]*gSpectrumAmplitudeMillivolts[1] + gSpectrumAmplitudeMillivolts[2]*gSpectrumAmplitudeMillivolts[2])/gSpectrumAmplitudeMillivolts[0];
+            for(int i = 0 ; i < 3 ; i++)
+            {
+                gSpectrumAmplitudeMillivolts[i] *= (1 + a) * (1 + a);
+            }
+        }
+    }
+    sprintf(txBuf, "n0.val=%d\xff\xff\xff",switch_12_3);
+    UART_SendString(txBuf);
+    plotSpectrum();
     gSamplesReady = true;
 }
 
@@ -891,6 +915,54 @@ void HMI_SendFullWave(uint8_t channel, int16_t *data, uint32_t count,
     }
 }
 
+void plotSpectrum()
+{
+    sprintf(txBuf, "cle s1.id,0\xff\xff\xff");
+    UART_SendString(txBuf);
+    sprintf(txBuf, "ref s1.id\xff\xff\xff");
+    UART_SendString(txBuf); 
+    uint16_t Spectrumvalue[3] = {0};
+    uint8_t diff[2] = {0};
+    if(gSpectrumFrequencyHz[1] != 0)
+        diff[0] = 1.05 * (gSpectrumFrequencyHz[1]-gSpectrumFrequencyHz[0]) / gSpectrumFrequencyHz[0];
+    if(gSpectrumFrequencyHz[2] != 0)
+        diff[1] = 1.05 * (gSpectrumFrequencyHz[2]-gSpectrumFrequencyHz[1]) / gSpectrumFrequencyHz[0];
+    for(int j = 0 ; j<10 ; j++)
+        {
+            sprintf(txBuf, "add s1.id,0,%d", 0);
+            strcat(txBuf, "\xff\xff\xff");
+            UART_SendString(txBuf);
+        }
+    for(int i = 0 ; i < 3 ; i++)
+    {
+        if(gSpectrumAmplitudeMillivolts[i] != 0)
+        {
+            Spectrumvalue[i] = 1.0 * gSpectrumAmplitudeMillivolts[i] / gSpectrumAmplitudeMillivolts[0] * 255;
+        }
+        else 
+            break;
+        for(int j = 0 ; j < 5 ; j++)
+        {
+            sprintf(txBuf, "add s1.id,0,%d", 0);
+            strcat(txBuf, "\xff\xff\xff");
+            UART_SendString(txBuf);
+            sprintf(txBuf, "add s1.id,0,%d", Spectrumvalue[i]);
+            strcat(txBuf, "\xff\xff\xff");
+            UART_SendString(txBuf);
+        }
+        if(i<2){
+        for(int k = 0 ; k < diff[i] ; k++){
+        for(int j = 0 ; j<17 ; j++)
+        {
+            sprintf(txBuf, "add s1.id,0,%d", 0);
+            strcat(txBuf, "\xff\xff\xff");
+            UART_SendString(txBuf);
+        }
+        }
+        }
+    }
+}
+
 /**
  * @brief UART接收中断处理
  * 每个字节收到后都会触发
@@ -904,7 +976,18 @@ void UART_0_INST_IRQHandler(void) {
         if(i>0)
         {
             if(gRxPacket[i-1] == 0xFE)
+            {
                 rxBuffer = gRxPacket[i];
+                if(rxBuffer == 2)
+                {
+                    DL_GPIO_togglePins(GPIOA, DL_GPIO_PIN_12);
+                    delay_cycles(3000);
+                    DL_GPIO_togglePins(GPIOA, DL_GPIO_PIN_13);
+                    switch_12_3 = !switch_12_3;
+                    //sprintf(txBuf, "n0.val=%d\xff\xff\xff",switch_12_3);
+                    //UART_SendString(txBuf);
+                }
+            }
         }
     }
 }
