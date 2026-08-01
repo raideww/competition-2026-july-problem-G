@@ -19,7 +19,7 @@
 #define INPUT_VOLTAGE_CALIBRATION_NUMERATOR   (980)
 #define INPUT_VOLTAGE_CALIBRATION_DENOMINATOR (1000)
 #define FRONT_END_AMPLITUDE_SCALE             (0.1366f) // mv = mv * 0.118
-#define FRONT_END_AMPLITUDE_SCALE_THIRD       (1.124f)
+#define FRONT_END_AMPLITUDE_SCALE_THIRD       (1.121f)
 #define FRONT_END_SCALE_SLOPE_PER_MHZ         (0.08f) // mv = mv - freq * mv /1000000 * 0.08
 #define FRONT_END_SCALE_SLOPE_PER_MHZ_THIRD         (0.0831f)
 #define HERTZ_PER_MEGAHERTZ                   (1000000.0f)
@@ -39,7 +39,7 @@ _Static_assert(CPUCLK_FREQ == SAMPLE_TIMER_CLOCK_HZ,
 _Static_assert(
     (SAMPLE_TIMER_CLOCK_HZ % SAMPLE_TIMER_TICKS_PER_SAMPLE) == 0UL,
     "sampling timer period must produce an integer sample rate");
-_Static_assert(SAMPLE_RATE_HZ == 2000000UL,
+_Static_assert(SAMPLE_RATE_HZ == 2500000UL,
     "sampling timer changed: update FFT frequency limits and scaling");
 _Static_assert(SAMPLE_RATE_HZ <= (SAMPLE_COUNT * 1000UL),
     "FFT bin spacing must not exceed 500 Hz");
@@ -149,8 +149,8 @@ void captureAndProcessSamples(void)
           -13176464,    -6588356,   -3294193,   -1647099
     };
     enum {
-        FIRST_SPECTRUM_BIN = 20,
-        LAST_SPECTRUM_BIN = 1024,
+        FIRST_SPECTRUM_BIN = 16,
+        LAST_SPECTRUM_BIN = 819,
         PEAK_SEPARATION_BINS = 8,
         MIN_SPECTRAL_AMPLITUDE_MV = 1,
         RECONSTRUCTION_POINTS = 2048
@@ -441,6 +441,18 @@ void captureAndProcessSamples(void)
         if (amplitudeMillivolts < MIN_SPECTRAL_AMPLITUDE_MV) {
             break;
         }
+        //
+        if (gSpectrumComponentCount > 0) {
+            uint32_t fundamental = gSpectrumFrequencyHz[0];  // 第一个找到的作为基波
+            if (fundamental != 0) {
+                uint32_t remainder1 = frequencyHz % fundamental;
+                uint32_t remainder2 = (frequencyHz+1000) % fundamental;
+                if (remainder1 > 1000 && remainder2 > 1000) {
+                    // 不是整数倍谐波，跳过
+                    break;
+                }
+            }
+        }
 
         uint32_t result = gSpectrumComponentCount;
         selectedBin[result] = (uint16_t) bin;
@@ -576,6 +588,24 @@ void captureAndProcessSamples(void)
                 componentFrequencyHz;
             gSpectrumAmplitudeMillivolts[validComponentCount] =
                 (uint16_t) (calibratedAmplitudeMillivolts + 0.5f);
+            if(switch_12_3)
+            {
+                //gUppMillivolts *= FRONT_END_AMPLITUDE_SCALE_THIRD;
+                //gUppMillivolts += FRONT_END_SCALE_SLOPE_PER_MHZ_THIRD * gSpectrumFrequencyHz[0] * gSpectrumFrequencyHz[0] *0.000000001 * gUppMillivolts * 0.01;
+                //gUrmsMillivolts *= FRONT_END_AMPLITUDE_SCALE_THIRD;
+                //gUrmsMillivolts += FRONT_END_SCALE_SLOPE_PER_MHZ_THIRD * gSpectrumFrequencyHz[0] * gSpectrumFrequencyHz[0] *0.000000001 * gUrmsMillivolts * 0.01;
+                gSpectrumAmplitudeMillivolts[i] *= FRONT_END_AMPLITUDE_SCALE_THIRD;
+                gSpectrumAmplitudeMillivolts[i] += FRONT_END_SCALE_SLOPE_PER_MHZ_THIRD * gSpectrumFrequencyHz[i] * gSpectrumFrequencyHz[i] *0.000000001 * gSpectrumAmplitudeMillivolts[i] * 0.01;
+                if(gSpectrumAmplitudeMillivolts[1] != 0)
+                {
+                    float a = 0 * sqrt(gSpectrumAmplitudeMillivolts[1]*gSpectrumAmplitudeMillivolts[1] + gSpectrumAmplitudeMillivolts[2]*gSpectrumAmplitudeMillivolts[2])/gSpectrumAmplitudeMillivolts[0];
+                    for(int i = 0 ; i < 3 ; i++)
+                    {
+                        gSpectrumAmplitudeMillivolts[i] *= (1 + a) * (1 + a);
+                    }
+                }
+            }
+            calibratedAmplitudeMillivolts = (float) gSpectrumAmplitudeMillivolts[i];
             calibratedPeakMillivolts[validComponentCount] =
                 calibratedAmplitudeMillivolts;
             validComponentCount++;
@@ -587,7 +617,27 @@ void captureAndProcessSamples(void)
         }
         gSpectrumComponentCount = (uint8_t) validComponentCount;
 
-        /* Recover each line's phase from the preserved time samples. */
+    /*if(switch_12_3)
+    {
+        //gUppMillivolts *= FRONT_END_AMPLITUDE_SCALE_THIRD;
+        //gUppMillivolts += FRONT_END_SCALE_SLOPE_PER_MHZ_THIRD * gSpectrumFrequencyHz[0] * gSpectrumFrequencyHz[0] *0.000000001 * gUppMillivolts * 0.01;
+        //gUrmsMillivolts *= FRONT_END_AMPLITUDE_SCALE_THIRD;
+        //gUrmsMillivolts += FRONT_END_SCALE_SLOPE_PER_MHZ_THIRD * gSpectrumFrequencyHz[0] * gSpectrumFrequencyHz[0] *0.000000001 * gUrmsMillivolts * 0.01;
+        for(int i = 0 ; i < 3 ; i++)
+        {
+            gSpectrumAmplitudeMillivolts[i] *= FRONT_END_AMPLITUDE_SCALE_THIRD;
+            gSpectrumAmplitudeMillivolts[i] += FRONT_END_SCALE_SLOPE_PER_MHZ_THIRD * gSpectrumFrequencyHz[i] * gSpectrumFrequencyHz[i] *0.000000001 * gSpectrumAmplitudeMillivolts[i] * 0.01;
+        }
+        if(gSpectrumAmplitudeMillivolts[1] != 0)
+        {
+            float a = 0 * sqrt(gSpectrumAmplitudeMillivolts[1]*gSpectrumAmplitudeMillivolts[1] + gSpectrumAmplitudeMillivolts[2]*gSpectrumAmplitudeMillivolts[2])/gSpectrumAmplitudeMillivolts[0];
+            for(int i = 0 ; i < 3 ; i++)
+            {
+                gSpectrumAmplitudeMillivolts[i] *= (1 + a) * (1 + a);
+            }
+        }
+    }*/
+            /* Recover each line's phase from the preserved time samples. */
 /* 相位固定为0，直接用幅值重构 */
 float componentCos[MAX_SPECTRAL_COMPONENTS] = {0.0f};
 float componentSin[MAX_SPECTRAL_COMPONENTS] = {0.0f};
@@ -665,29 +715,11 @@ HMI_SendFullWave2(0, gSamplesMillivolts, RECONSTRUCTION_POINTS, 238);
             gSpectrumFrequencyHz[i] = 0U;
         }
     }
-    if(switch_12_3)
-    {
-        gUppMillivolts *= FRONT_END_AMPLITUDE_SCALE_THIRD;
-        gUppMillivolts += FRONT_END_SCALE_SLOPE_PER_MHZ_THIRD * gSpectrumFrequencyHz[0] * gSpectrumFrequencyHz[0] * 0.000000001;
-        gUrmsMillivolts *= FRONT_END_AMPLITUDE_SCALE_THIRD;
-        gUrmsMillivolts += FRONT_END_SCALE_SLOPE_PER_MHZ_THIRD * gSpectrumFrequencyHz[0] * gSpectrumFrequencyHz[0] * 0.000000001 ;
-        for(int i = 0 ; i < 3 ; i++)
-        {
-            gSpectrumAmplitudeMillivolts[i] *= FRONT_END_AMPLITUDE_SCALE_THIRD;
-            gSpectrumAmplitudeMillivolts[i] += FRONT_END_SCALE_SLOPE_PER_MHZ_THIRD * gSpectrumFrequencyHz[i] * gSpectrumFrequencyHz[i] *0.000000001 * gSpectrumAmplitudeMillivolts[i] * 0.01;
-        }
-        if(gSpectrumAmplitudeMillivolts[1] != 0)
-        {
-            float a = 0 * sqrt(gSpectrumAmplitudeMillivolts[1]*gSpectrumAmplitudeMillivolts[1] + gSpectrumAmplitudeMillivolts[2]*gSpectrumAmplitudeMillivolts[2])/gSpectrumAmplitudeMillivolts[0];
-            for(int i = 0 ; i < 3 ; i++)
-            {
-                gSpectrumAmplitudeMillivolts[i] *= (1 + a) * (1 + a);
-            }
-        }
-    }
     sprintf(txBuf, "n0.val=%d\xff\xff\xff",switch_12_3);
     UART_SendString(txBuf);
     plotSpectrum();
+    sprintf(txBuf, "n2.val=%d\xff\xff\xff",gUppMillivolts);
+    UART_SendString(txBuf);
     gSamplesReady = true;
 }
 
@@ -960,7 +992,7 @@ void plotSpectrum()
         }
         if(i<2){
         for(int k = 0 ; k < diff[i] ; k++){
-        for(int j = 0 ; j<10 ; j++)
+        for(int j = 0 ; j<15 ; j++)
         {
             sprintf(txBuf, "add s1.id,0,%d", 0);
             strcat(txBuf, "\xff\xff\xff");
@@ -979,6 +1011,7 @@ void plotSpectrum()
 void UART_0_INST_IRQHandler(void) {
     for(int i = 0 ; i < 12 ; i++)
     {
+        delay_cycles(3000);
         if(gRxPacket[i]==0xFE)
             continue;
         if(i>0)
@@ -986,7 +1019,7 @@ void UART_0_INST_IRQHandler(void) {
             if(gRxPacket[i-1] == 0xFE)
             {
                 rxBuffer = gRxPacket[i];
-                if(rxBuffer == 2)
+                if(rxBuffer == 0X0F)
                 {
                     DL_GPIO_togglePins(GPIOA, DL_GPIO_PIN_12);
                     delay_cycles(3000);
